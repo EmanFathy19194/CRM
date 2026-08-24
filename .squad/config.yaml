@@ -1,0 +1,31 @@
+version: 1
+project:
+  name: CRM
+  primaryLanguage: typescript
+  projectRoots:
+    - .
+tracker:
+  type: jira
+  workspace: emanfathy19194.atlassian.net
+naming:
+  includeTrackerId: true
+  globalSequence: true
+agents: []
+planner:
+  enabled: true
+  provider: openai
+  model: gpt-4o
+  modelOverride:
+    openai: gpt-4o
+  mode: auto
+  budget:
+    maxFileReads: 25
+    maxContextBytes: 50000
+    maxDurationSeconds: 180
+  cache:
+    enabled: true
+  stages:
+    scout:
+      modelOverride: gpt-4o
+      enabled: false
+  maxOutputTokens: 16384
