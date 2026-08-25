@@ -1,6 +1,7 @@
 export const protectedPages: Record<string, string> = {
   "/dashboard": "Dashboard",
   "/customers": "Customers",
+  "/tickets": "Tickets",
   "/contacts": "Contacts",
   "/opportunities": "Opportunities",
   "/tasks": "Tasks",
@@ -47,12 +48,14 @@ export function renderProtectedShell(content: string, currentPath: string) {
 
 export async function route() {
   const path = window.location.pathname;
-  if (path === "/" || !protectedPages[path] && !/^\/customers\/\d+$/.test(path)) {
+  if (path === "/" || !protectedPages[path] && !/^\/(customers|tickets)\/\d+$/.test(path)) {
     const { renderLogin } = await import("./login.js"); renderLogin(); return;
   }
   const authResponse = await fetch("/api/me", { credentials: "same-origin" });
   if (!authResponse.ok) { history.replaceState({}, "", "/"); const { renderLogin } = await import("./login.js"); renderLogin("Please sign in to continue."); return; }
   if (/^\/customers\/\d+$/.test(path)) { const { renderCustomerDetails } = await import("./customer-details.js"); await renderCustomerDetails(Number(path.split("/")[2])); return; }
+  if (/^\/tickets\/\d+$/.test(path)) { const { renderTicketDetails } = await import("./ticket-details.js"); await renderTicketDetails(Number(path.split("/")[2])); return; }
   if (path === "/customers") { const { renderCustomers } = await import("./customers.js"); await renderCustomers(); return; }
+  if (path === "/tickets") { const { renderTickets } = await import("./tickets.js"); await renderTickets(); return; }
   const { renderDashboard } = await import("./dashboard.js"); renderDashboard(protectedPages[path]);
 }

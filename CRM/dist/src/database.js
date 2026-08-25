@@ -47,5 +47,25 @@ export function createDatabase(location = process.env.CRM_DATABASE_PATH ?? join(
     created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS customer_interactions_customer_idx ON customer_interactions (customer_id, created_at DESC, id DESC);`);
+    database.exec(`CREATE TABLE IF NOT EXISTS support_tickets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_number TEXT NOT NULL UNIQUE,
+    customer_id INTEGER NOT NULL REFERENCES customers(id),
+    subject TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL,
+    priority TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
+    assigned_agent TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('new', 'open', 'in_progress', 'pending', 'resolved', 'closed')),
+    due_date TEXT, is_escalated INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS support_tickets_created_at_idx ON support_tickets (created_at DESC, id DESC);
+  CREATE INDEX IF NOT EXISTS support_tickets_filters_idx ON support_tickets (status, priority, customer_id);
+  CREATE TABLE IF NOT EXISTS ticket_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+    action TEXT NOT NULL, old_value TEXT, new_value TEXT,
+    changed_by TEXT NOT NULL, created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS ticket_history_ticket_idx ON ticket_history (ticket_id, created_at DESC, id DESC);`);
     return database;
 }

@@ -9,13 +9,17 @@ import { createDatabase } from "./database.js";
 import { CustomerRepository } from "./customer-repository.js";
 import { validateCustomer, validateInteraction, validateText } from "./customer-validation.js";
 import { customerStatuses } from "./customer.js";
+import { TicketRepository } from "./ticket-repository.js";
+import { ticketPriorities, ticketStatuses } from "./ticket.js";
+import { parsePositiveInteger, validateTicket } from "./ticket-validation.js";
 const cookieName = "crm_session";
 const projectRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const uploadDirectory = process.env.CRM_UPLOAD_DIR ?? join(projectRoot, "data", "uploads");
 mkdirSync(uploadDirectory, { recursive: true });
-const protectedPagePaths = ["/dashboard", "/customers", "/contacts", "/opportunities", "/tasks", "/activities"];
+const protectedPagePaths = ["/dashboard", "/customers", "/tickets", "/contacts", "/opportunities", "/tasks", "/activities"];
 const customerDetailsPagePath = /^\/customers\/\d+$/;
-const protectedApiPaths = ["/api/customers", "/api/contacts", "/api/opportunities", "/api/tasks", "/api/activities"];
+const ticketDetailsPagePath = /^\/tickets\/\d+$/;
+const protectedApiPaths = ["/api/customers", "/api/tickets", "/api/contacts", "/api/opportunities", "/api/tasks", "/api/activities"];
 const upload = multer({ dest: uploadDirectory, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: (_request, file, callback) => callback(null, /^[a-zA-Z0-9._ -]+$/.test(file.originalname)) });
 function readCookie(request, name) {
     return request.headers.cookie
@@ -26,7 +30,7 @@ function readCookie(request, name) {
 function getAuthenticatedUser(request, auth) {
     return auth.getUser(readCookie(request, cookieName));
 }
-export function createApp(auth, customerRepository = new CustomerRepository(createDatabase())) {
+export function createApp(auth, customerRepository = new CustomerRepository(createDatabase()), ticketRepository = new TicketRepository(customerRepository.getDatabase())) {
     const app = express();
     app.use(express.json({ limit: "10kb" }));
     app.use(protectedApiPaths, (request, response, next) => {
@@ -151,6 +155,64 @@ export function createApp(auth, customerRepository = new CustomerRepository(crea
         unlinkSync(join(uploadDirectory, attachment.storageName));
     }
     catch { /* metadata is already removed; the private orphan is not user-visible */ } return response.status(204).send(); });
+    function ticketId(request, response) {
+        const id = parsePositiveInteger(request.params.id);
+        if (!id) {
+            response.status(400).json({ error: "Invalid ticket id." });
+            return null;
+        }
+        return id;
+    }
+    function actor(request) { return getAuthenticatedUser(request, auth).email; }
+    app.get("/api/tickets", (request, response) => {
+        const page = parsePositiveInteger(request.query.page ?? 1), pageSize = parsePositiveInteger(request.query.pageSize ?? 10);
+        const status = String(request.query.status ?? ""), priority = String(request.query.priority ?? ""), assignedAgent = String(request.query.assignedAgent ?? ""), customerId = request.query.customerId === undefined || request.query.customerId === "" ? undefined : parsePositiveInteger(request.query.customerId);
+        if (!page || !pageSize || (status && !ticketStatuses.includes(status)) || (priority && !ticketPriorities.includes(priority)) || (request.query.customerId !== undefined && request.query.customerId !== "" && !customerId))
+            return response.status(400).json({ error: "Invalid ticket filters." });
+        return response.json(ticketRepository.listTickets(page, pageSize, { status: status || undefined, priority: priority || undefined, assignedAgent: assignedAgent || undefined, customerId }));
+    });
+    app.post("/api/tickets", (request, response) => {
+        const { value, errors } = validateTicket(request.body ?? {});
+        if (Object.keys(errors).length)
+            return response.status(400).json({ errors });
+        if (!customerRepository.getCustomer(value.customerId))
+            return response.status(404).json({ error: "Customer not found." });
+        try {
+            return response.status(201).json(ticketRepository.createTicket(value, actor(request)));
+        }
+        catch {
+            return response.status(500).json({ error: "Unable to save ticket." });
+        }
+    });
+    app.get("/api/tickets/:id", (request, response) => { const id = ticketId(request, response); if (!id)
+        return; const ticket = ticketRepository.getTicket(id); return ticket ? response.json(ticket) : response.status(404).json({ error: "Ticket not found." }); });
+    app.patch("/api/tickets/:id", (request, response) => {
+        const id = ticketId(request, response);
+        if (!id)
+            return;
+        const { value, errors } = validateTicket(request.body ?? {});
+        if (Object.keys(errors).length)
+            return response.status(400).json({ errors });
+        if (!customerRepository.getCustomer(value.customerId))
+            return response.status(404).json({ error: "Customer not found." });
+        try {
+            const ticket = ticketRepository.updateTicket(id, value, actor(request));
+            return ticket ? response.json(ticket) : response.status(404).json({ error: "Ticket not found." });
+        }
+        catch {
+            return response.status(500).json({ error: "Unable to update ticket." });
+        }
+    });
+    app.post("/api/tickets/:id/escalate", (request, response) => { const id = ticketId(request, response); if (!id)
+        return; try {
+        const ticket = ticketRepository.escalateTicket(id, actor(request));
+        return ticket ? response.json(ticket) : response.status(404).json({ error: "Ticket not found." });
+    }
+    catch {
+        return response.status(500).json({ error: "Unable to escalate ticket." });
+    } });
+    app.get("/api/tickets/:id/history", (request, response) => { const id = ticketId(request, response); if (!id)
+        return; return ticketRepository.getTicket(id) ? response.json(ticketRepository.listHistory(id)) : response.status(404).json({ error: "Ticket not found." }); });
     app.use(express.static(join(projectRoot, "public")));
     app.post("/api/login", async (request, response) => {
         const credentials = request.body;
@@ -190,10 +252,16 @@ export function createApp(auth, customerRepository = new CustomerRepository(crea
         response.setHeader("Cache-Control", "no-store");
         return response.sendFile(join(projectRoot, "public", "index.html"));
     });
+    app.get(ticketDetailsPagePath, (request, response) => {
+        if (!getAuthenticatedUser(request, auth))
+            return response.redirect("/");
+        response.setHeader("Cache-Control", "no-store");
+        return response.sendFile(join(projectRoot, "public", "index.html"));
+    });
     app.get("*", (_request, response) => response.sendFile(join(projectRoot, "public", "index.html")));
     return app;
 }
-const auth = new AuthService();
+const auth = new AuthService(process.env.CRM_SESSION_PATH ?? join(projectRoot, "data", "sessions.json"));
 await auth.seedUser("demo@example.com", "Password123!");
 const app = createApp(auth);
 if (process.env.NODE_ENV !== "test") {

@@ -1,0 +1,34 @@
+import { escapeHtml, renderProtectedShell, route } from "./shared.js";
+const statuses = ["new", "open", "in_progress", "pending", "resolved", "closed"];
+const priorities = ["low", "medium", "high", "urgent"];
+const options = (values, selected = "") => values.map((value) => `<option value="${value}"${value === selected ? " selected" : ""}>${escapeHtml(value.replace("_", " "))}</option>`).join("");
+const value = (input) => escapeHtml(String(input ?? ""));
+export async function renderTickets(page = 1, filters = {}) {
+    renderProtectedShell(`<div id="page-content"><div class="customer-loading"><span class="loading-orb"></span><p>Loading tickets...</p></div></div>`, "/tickets");
+    const content = document.querySelector("#page-content");
+    const query = new URLSearchParams({ page: String(page), pageSize: "8", ...Object.fromEntries(Object.entries(filters).filter(([, item]) => item)) });
+    const [ticketResponse, customerResponse, meResponse] = await Promise.all([fetch(`/api/tickets?${query}`, { credentials: "same-origin" }), fetch("/api/customers?pageSize=50", { credentials: "same-origin" }), fetch("/api/me", { credentials: "same-origin" })]);
+    if (!ticketResponse.ok) {
+        content.innerHTML = `<div class="customer-error" role="alert"><strong>We could not load tickets.</strong><button id="retry-tickets" type="button">Try again</button></div>`;
+        document.querySelector("#retry-tickets").addEventListener("click", () => void renderTickets());
+        return;
+    }
+    const result = await ticketResponse.json();
+    const customers = customerResponse.ok ? (await customerResponse.json()).items : [];
+    const agent = meResponse.ok ? (await meResponse.json()).user.email : "";
+    content.innerHTML = `<div class="customer-heading"><div><span class="eyebrow">Support workspace</span><h1>Tickets</h1><p class="form-intro">Track every customer issue through resolution.</p></div><button class="add-customer-button" id="show-ticket-form"><span>+</span> Add ticket</button></div><div class="ticket-filters"><label>Status<select id="ticket-status"><option value="">All statuses</option>${options(statuses, filters.status)}</select></label><label>Priority<select id="ticket-priority"><option value="">All priorities</option>${options(priorities, filters.priority)}</select></label><label>Assigned agent<input id="ticket-agent" value="${value(filters.assignedAgent)}" placeholder="Agent" /></label></div><div id="ticket-feedback" role="status"></div><form class="ticket-form" id="ticket-form" hidden><div class="customer-fields"><label>Customer *<select name="customerId" required><option value="">Choose customer</option>${customers.map((customer) => `<option value="${customer.id}">${value(customer.firstName)} ${value(customer.lastName)} — ${value(customer.email)}</option>`).join("")}</select></label><label>Subject *<input name="subject" maxlength="200" required /></label><label>Category *<input name="category" maxlength="100" required /></label><label>Priority *<select name="priority">${options(priorities, "medium")}</select></label><label>Assigned agent *<input name="assignedAgent" maxlength="200" value="${value(agent)}" required /></label><label>Status *<select name="status">${options(statuses, "new")}</select></label><label>Due date<input name="dueDate" type="date" /></label><label class="wide-field">Description *<textarea name="description" maxlength="2000" required></textarea></label></div><p role="alert" id="ticket-error"></p><div class="form-actions"><button class="cancel-button" id="cancel-ticket-form" type="button">Cancel</button><button type="submit">Create ticket</button></div></form><div class="ticket-list">${result.items.length ? result.items.map((ticket) => `<article class="ticket-row"><div><strong>${value(ticket.ticketNumber)}</strong><span>${value(ticket.customerName)}</span></div><div><strong>${value(ticket.subject)}</strong><span>${value(ticket.category)}</span></div><span class="ticket-badge ${value(ticket.priority)}">${value(ticket.priority)}</span><span class="status-badge">${value(ticket.status.replace("_", " "))}</span><span>${value(ticket.assignedAgent)}</span><span>${ticket.isEscalated ? "Escalated" : ""}</span><button type="button" data-ticket-id="${ticket.id}">View</button></article>`).join("") : `<div class="empty-customers"><strong>No tickets found.</strong><span>Create a ticket or adjust the filters.</span></div>`}</div><div class="pagination"><button id="previous-ticket-page" type="button" ${result.page <= 1 ? "disabled" : ""}>Previous</button><span>Page ${result.page} of ${result.totalPages}</span><button id="next-ticket-page" type="button" ${result.page >= result.totalPages ? "disabled" : ""}>Next</button></div>`;
+    const nextFilters = () => ({ status: (document.querySelector("#ticket-status")).value, priority: (document.querySelector("#ticket-priority")).value, assignedAgent: (document.querySelector("#ticket-agent")).value.trim() });
+    document.querySelector("#ticket-status").addEventListener("change", () => void renderTickets(1, nextFilters()));
+    document.querySelector("#ticket-priority").addEventListener("change", () => void renderTickets(1, nextFilters()));
+    document.querySelector("#ticket-agent").addEventListener("change", () => void renderTickets(1, nextFilters()));
+    document.querySelector("#previous-ticket-page").addEventListener("click", () => void renderTickets(result.page - 1, filters));
+    document.querySelector("#next-ticket-page").addEventListener("click", () => void renderTickets(result.page + 1, filters));
+    document.querySelector("#show-ticket-form").addEventListener("click", () => { document.querySelector("#ticket-form").hidden = false; });
+    document.querySelector("#cancel-ticket-form").addEventListener("click", () => { document.querySelector("#ticket-form").hidden = true; });
+    document.querySelector("#ticket-form").addEventListener("submit", async (event) => { event.preventDefault(); const form = event.currentTarget, button = form.querySelector("button[type=submit]"), error = form.querySelector("#ticket-error"); button.disabled = true; const response = await fetch("/api/tickets", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form).entries())) }); const body = await response.json(); if (!response.ok) {
+        error.textContent = Object.values(body.errors ?? {}).join(" ") || body.error || "Unable to create ticket.";
+        button.disabled = false;
+        return;
+    } history.pushState({}, "", `/tickets/${body.id}`); await route(); });
+    document.querySelectorAll("[data-ticket-id]").forEach((button) => button.addEventListener("click", () => { history.pushState({}, "", `/tickets/${button.dataset.ticketId}`); void route(); }));
+}
