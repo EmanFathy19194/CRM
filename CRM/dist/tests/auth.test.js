@@ -4,6 +4,7 @@ import { AuthService } from "../src/auth.js";
 import { createApp } from "../src/server.js";
 import { createDatabase } from "../src/database.js";
 import { CustomerRepository } from "../src/customer-repository.js";
+import { scheduleCustomerSearch } from "../public/pages/customers.js";
 describe("login", () => {
     let auth;
     beforeEach(async () => {
@@ -127,6 +128,15 @@ describe("login", () => {
         const search = await agent.get("/api/customers?search=NAVY");
         expect(search.body.items).toHaveLength(1);
         expect(search.body.items[0].lastName).toBe("Hopper");
+    });
+    it("uses the latest customer search value when typing quickly", async () => {
+        const calls = [];
+        const timer = { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
+        scheduleCustomerSearch((value) => calls.push(value), "gr", 10, timer.setTimeout, timer.clearTimeout);
+        scheduleCustomerSearch((value) => calls.push(value), "gra", 10, timer.setTimeout, timer.clearTimeout);
+        scheduleCustomerSearch((value) => calls.push(value), "grac", 10, timer.setTimeout, timer.clearTimeout);
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 20));
+        expect(calls).toEqual(["grac"]);
     });
     it("manages customer-scoped notes, interactions, and attachments", async () => {
         const repository = new CustomerRepository(createDatabase(":memory:"));

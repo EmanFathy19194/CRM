@@ -12,6 +12,7 @@ export class CustomerRepository {
     constructor(database) {
         this.database = database;
     }
+    getDatabase() { return this.database; }
     createCustomer(input) {
         const now = new Date().toISOString();
         const result = this.database.prepare(`INSERT INTO customers

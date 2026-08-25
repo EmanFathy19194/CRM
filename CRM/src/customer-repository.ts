@@ -17,6 +17,8 @@ function mapCustomer(row: CustomerRow): Customer {
 export class CustomerRepository {
   constructor(private readonly database: DatabaseSync) {}
 
+  getDatabase(): DatabaseSync { return this.database; }
+
   createCustomer(input: CreateCustomerInput): Customer {
     const now = new Date().toISOString();
     const result = this.database.prepare(`INSERT INTO customers

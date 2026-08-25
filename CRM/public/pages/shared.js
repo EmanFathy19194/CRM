@@ -1,6 +1,7 @@
 export const protectedPages = {
     "/dashboard": "Dashboard",
     "/customers": "Customers",
+    "/tickets": "Tickets",
     "/contacts": "Contacts",
     "/opportunities": "Opportunities",
     "/tasks": "Tasks",
@@ -49,7 +50,7 @@ export function renderProtectedShell(content, currentPath) {
 }
 export async function route() {
     const path = window.location.pathname;
-    if (path === "/" || !protectedPages[path] && !/^\/customers\/\d+$/.test(path)) {
+    if (path === "/" || !protectedPages[path] && !/^\/(customers|tickets)\/\d+$/.test(path)) {
         const { renderLogin } = await import("./login.js");
         renderLogin();
         return;
@@ -66,9 +67,19 @@ export async function route() {
         await renderCustomerDetails(Number(path.split("/")[2]));
         return;
     }
+    if (/^\/tickets\/\d+$/.test(path)) {
+        const { renderTicketDetails } = await import("./ticket-details.js");
+        await renderTicketDetails(Number(path.split("/")[2]));
+        return;
+    }
     if (path === "/customers") {
         const { renderCustomers } = await import("./customers.js");
         await renderCustomers();
+        return;
+    }
+    if (path === "/tickets") {
+        const { renderTickets } = await import("./tickets.js");
+        await renderTickets();
         return;
     }
     const { renderDashboard } = await import("./dashboard.js");
