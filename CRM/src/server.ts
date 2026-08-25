@@ -13,15 +13,18 @@ import { customerStatuses } from "./customer.js";
 import { TicketRepository } from "./ticket-repository.js";
 import { ticketPriorities, ticketStatuses } from "./ticket.js";
 import { parsePositiveInteger, validateTicket } from "./ticket-validation.js";
+import { CommunicationRepository } from "./communication-repository.js";
+import { communicationChannelTypes } from "./communication.js";
+import { validateCommunication, validatePublicWebRequest } from "./communication-validation.js";
 
 const cookieName = "crm_session";
 const projectRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const uploadDirectory = process.env.CRM_UPLOAD_DIR ?? join(projectRoot, "data", "uploads");
 mkdirSync(uploadDirectory, { recursive: true });
-const protectedPagePaths = ["/dashboard", "/customers", "/tickets", "/contacts", "/opportunities", "/tasks", "/activities"];
+const protectedPagePaths = ["/dashboard", "/customers", "/tickets", "/communications", "/contacts", "/opportunities", "/tasks", "/activities"];
 const customerDetailsPagePath = /^\/customers\/\d+$/;
 const ticketDetailsPagePath = /^\/tickets\/\d+$/;
-const protectedApiPaths = ["/api/customers", "/api/tickets", "/api/contacts", "/api/opportunities", "/api/tasks", "/api/activities"];
+const protectedApiPaths = ["/api/customers", "/api/tickets", "/api/communications", "/api/communication-channels", "/api/contacts", "/api/opportunities", "/api/tasks", "/api/activities"];
 const upload = multer({ dest: uploadDirectory, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: (_request, file, callback) => callback(null, /^[a-zA-Z0-9._ -]+$/.test(file.originalname)) });
 
 function readCookie(request: Request, name: string): string | undefined {
@@ -36,6 +39,7 @@ function getAuthenticatedUser(request: Request, auth: AuthService) {
 }
 
 export function createApp(auth: AuthService, customerRepository = new CustomerRepository(createDatabase()), ticketRepository = new TicketRepository(customerRepository.getDatabase())) {
+  const communicationRepository = new CommunicationRepository(customerRepository.getDatabase());
   const app = express();
   app.use(express.json({ limit: "10kb" }));
 
@@ -137,6 +141,57 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
   });
   app.post("/api/tickets/:id/escalate", (request, response) => { const id = ticketId(request, response); if (!id) return; try { const ticket = ticketRepository.escalateTicket(id, actor(request)); return ticket ? response.json(ticket) : response.status(404).json({ error: "Ticket not found." }); } catch { return response.status(500).json({ error: "Unable to escalate ticket." }); } });
   app.get("/api/tickets/:id/history", (request, response) => { const id = ticketId(request, response); if (!id) return; return ticketRepository.getTicket(id) ? response.json(ticketRepository.listHistory(id)) : response.status(404).json({ error: "Ticket not found." }); });
+  app.get("/api/communication-channels", (_request, response) => response.json(communicationRepository.listChannels()));
+  app.patch("/api/communication-channels/:type", (request, response) => { const type = request.params.type; if (!communicationChannelTypes.includes(type as typeof communicationChannelTypes[number]) || typeof request.body?.enabled !== "boolean") return response.status(400).json({ error: "Invalid channel." }); communicationRepository.setEnabled(type as typeof communicationChannelTypes[number], request.body.enabled); return response.json(communicationRepository.channel(type as typeof communicationChannelTypes[number])); });
+  app.get("/api/customers/:id/communications", (request, response) => { const id = customerId(request,response); if (!id) return; return customerRepository.getCustomer(id) ? response.json(communicationRepository.list(id)) : response.status(404).json({error:"Customer not found."}); });
+  app.get("/api/tickets/:id/communications", (request, response) => { const id = ticketId(request,response); if (!id) return; return ticketRepository.getTicket(id) ? response.json(communicationRepository.list(undefined,id)) : response.status(404).json({error:"Ticket not found."}); });
+  app.get("/api/communications", (request, response) => {
+    const customerId = request.query.customerId === undefined || request.query.customerId === "" ? undefined : parsePositiveInteger(request.query.customerId);
+    const ticketId = request.query.ticketId === undefined || request.query.ticketId === "" ? undefined : parsePositiveInteger(request.query.ticketId);
+    const channel = String(request.query.channel ?? "");
+    if ((request.query.customerId !== undefined && request.query.customerId !== "" && !customerId) || (request.query.ticketId !== undefined && request.query.ticketId !== "" && !ticketId)) return response.status(400).json({ error: "Invalid communication filters." });
+    if (channel && !communicationChannelTypes.includes(channel as typeof communicationChannelTypes[number])) return response.status(400).json({ error: "Invalid communication filters." });
+    return response.json(communicationRepository.list(customerId, ticketId, channel ? channel as typeof communicationChannelTypes[number] : undefined));
+  });
+  app.post("/api/communications", (request, response) => {
+    const { value, errors } = validateCommunication(request.body ?? {});
+    if (Object.keys(errors).length) return response.status(400).json({ errors });
+    if (!customerRepository.getCustomer(value.customerId)) return response.status(404).json({ error: "Customer not found." });
+    if (!communicationRepository.channel(value.channel)) return response.status(404).json({ error: "Channel not found." });
+    if (!communicationRepository.channel(value.channel)?.isEnabled) return response.status(403).json({ error: "Channel is disabled." });
+    const database = customerRepository.getDatabase();
+    try {
+      database.exec("BEGIN");
+      let ticketId = value.ticketId;
+      if (ticketId !== null) {
+        const ticket = ticketRepository.getTicket(ticketId);
+        if (!ticket || ticket.customerId !== value.customerId) { database.exec("ROLLBACK"); return response.status(404).json({ error: "Ticket not found." }); }
+      } else {
+        const created = ticketRepository.createTicket({ customerId: value.customerId, subject: value.message.slice(0, 200), description: value.message, category: "Communication", priority: "medium", assignedAgent: "Unassigned", status: "new", dueDate: null }, actor(request));
+        ticketId = created.id;
+      }
+      const communication = communicationRepository.create({ ...value, ticketId });
+      ticketRepository.addCommunicationHistory(ticketId!, communication.id, actor(request));
+      database.exec("COMMIT");
+      return response.status(201).json(communication);
+    } catch { try { database.exec("ROLLBACK"); } catch { /* no open transaction */ } return response.status(500).json({ error: "Unable to record communication." }); }
+  });
+  app.post("/api/public/web-requests", (request, response) => {
+    const { value, errors } = validatePublicWebRequest(request.body ?? {});
+    if (Object.keys(errors).length) return response.status(400).json({ errors });
+    const customer = customerRepository.getCustomerByEmail(value.email);
+    if (!customer) return response.status(404).json({ error: "Customer not found." });
+    if (!communicationRepository.channel("web_form")?.isEnabled) return response.status(403).json({ error: "Web form is disabled." });
+    const database = customerRepository.getDatabase();
+    try {
+      database.exec("BEGIN");
+      const ticket = ticketRepository.createTicket({ customerId: customer.id, subject: value.subject, description: value.message, category: value.category ?? "Web form", priority: "medium", assignedAgent: "Unassigned", status: "new", dueDate: value.dueDate }, "web-form");
+      const communication = communicationRepository.create({ customerId: customer.id, ticketId: ticket.id, channel: "web_form", message: value.message, sourceReference: null });
+      ticketRepository.addCommunicationHistory(ticket.id, communication.id, "web-form");
+      database.exec("COMMIT");
+      return response.status(201).json({ ticketNumber: ticket.ticketNumber });
+    } catch { try { database.exec("ROLLBACK"); } catch { /* no open transaction */ } return response.status(500).json({ error: "Unable to submit request." }); }
+  });
   app.use(express.static(join(projectRoot, "public")));
 
   app.post("/api/login", async (request, response) => {
@@ -186,12 +241,15 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
     return response.sendFile(join(projectRoot, "public", "index.html"));
   });
 
+  app.get("/support/request", (_request, response) => response.sendFile(join(projectRoot, "public", "support-request.html")));
+
   app.get("*", (_request, response) => response.sendFile(join(projectRoot, "public", "index.html")));
   return app;
 }
 
 const auth = new AuthService(process.env.CRM_SESSION_PATH ?? join(projectRoot, "data", "sessions.json"));
 await auth.seedUser("demo@example.com", "Password123!");
+await auth.seedUser("agent@example.com", "Password123!");
 const app = createApp(auth);
 
 if (process.env.NODE_ENV !== "test") {

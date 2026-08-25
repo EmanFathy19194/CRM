@@ -2,6 +2,7 @@ export const protectedPages: Record<string, string> = {
   "/dashboard": "Dashboard",
   "/customers": "Customers",
   "/tickets": "Tickets",
+  "/communications": "Communications",
   "/contacts": "Contacts",
   "/opportunities": "Opportunities",
   "/tasks": "Tasks",
@@ -57,5 +58,6 @@ export async function route() {
   if (/^\/tickets\/\d+$/.test(path)) { const { renderTicketDetails } = await import("./ticket-details.js"); await renderTicketDetails(Number(path.split("/")[2])); return; }
   if (path === "/customers") { const { renderCustomers } = await import("./customers.js"); await renderCustomers(); return; }
   if (path === "/tickets") { const { renderTickets } = await import("./tickets.js"); await renderTickets(); return; }
+  if (path === "/communications") { const { renderCommunications } = await import("./communications.js"); await renderCommunications(); return; }
   const { renderDashboard } = await import("./dashboard.js"); renderDashboard(protectedPages[path]);
 }

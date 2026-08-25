@@ -50,6 +50,11 @@ export class CustomerRepository {
     return row ? mapCustomer(row) : null;
   }
 
+  getCustomerByEmail(email: string): Customer | null {
+    const row = this.database.prepare("SELECT * FROM customers WHERE lower(email) = lower(?) ORDER BY id LIMIT 1").get(email) as CustomerRow | undefined;
+    return row ? mapCustomer(row) : null;
+  }
+
   updateCustomer(id: number, input: CreateCustomerInput): Customer | null {
     const now = new Date().toISOString();
     const result = this.database.prepare(`UPDATE customers SET first_name = ?, last_name = ?, email = ?, phone = ?, company = ?, job_title = ?, status = ?, address = ?, notes = ?, updated_at = ? WHERE id = ?`).run(

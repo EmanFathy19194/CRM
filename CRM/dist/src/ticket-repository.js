@@ -13,18 +13,19 @@ export class TicketRepository {
     history(ticketId, action, oldValue, newValue, changedBy, now) { this.database.prepare("INSERT INTO ticket_history (ticket_id, action, old_value, new_value, changed_by, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(ticketId, action, oldValue, newValue, changedBy, now); }
     createTicket(input, changedBy) {
         const now = new Date().toISOString();
-        this.database.exec("BEGIN");
+        this.database.exec("SAVEPOINT create_ticket");
         try {
             const result = this.database.prepare("INSERT INTO support_tickets (ticket_number, customer_id, subject, description, category, priority, assigned_agent, status, due_date, is_escalated, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)").run("", input.customerId, input.subject, input.description, input.category, input.priority, input.assignedAgent, input.status, input.dueDate, now, now);
             const id = Number(result.lastInsertRowid);
             const ticketNumber = `TKT-${String(id).padStart(6, "0")}`;
             this.database.prepare("UPDATE support_tickets SET ticket_number = ? WHERE id = ?").run(ticketNumber, id);
             this.history(id, "created", null, ticketNumber, changedBy, now);
-            this.database.exec("COMMIT");
+            this.database.exec("RELEASE SAVEPOINT create_ticket");
             return this.getTicket(id);
         }
         catch (error) {
-            this.database.exec("ROLLBACK");
+            this.database.exec("ROLLBACK TO SAVEPOINT create_ticket");
+            this.database.exec("RELEASE SAVEPOINT create_ticket");
             throw error;
         }
     }
@@ -93,6 +94,9 @@ export class TicketRepository {
             this.database.exec("ROLLBACK");
             throw error;
         }
+    }
+    addCommunicationHistory(ticketId, communicationId, changedBy) {
+        this.history(ticketId, "communication_received", null, String(communicationId), changedBy, new Date().toISOString());
     }
     listHistory(ticketId) { return this.database.prepare("SELECT * FROM ticket_history WHERE ticket_id = ? ORDER BY created_at DESC, id DESC").all(ticketId).map(mapHistory); }
 }

@@ -38,6 +38,10 @@ export class CustomerRepository {
         const row = this.database.prepare("SELECT * FROM customers WHERE id = ?").get(id);
         return row ? mapCustomer(row) : null;
     }
+    getCustomerByEmail(email) {
+        const row = this.database.prepare("SELECT * FROM customers WHERE lower(email) = lower(?) ORDER BY id LIMIT 1").get(email);
+        return row ? mapCustomer(row) : null;
+    }
     updateCustomer(id, input) {
         const now = new Date().toISOString();
         const result = this.database.prepare(`UPDATE customers SET first_name = ?, last_name = ?, email = ?, phone = ?, company = ?, job_title = ?, status = ?, address = ?, notes = ?, updated_at = ? WHERE id = ?`).run(input.firstName, input.lastName, input.email, input.phone, input.company, input.jobTitle, input.status, input.address, input.notes, now, id);
