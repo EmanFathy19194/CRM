@@ -2,6 +2,7 @@ export const protectedPages = {
     "/dashboard": "Dashboard",
     "/customers": "Customers",
     "/tickets": "Tickets",
+    "/communications": "Communications",
     "/contacts": "Contacts",
     "/opportunities": "Opportunities",
     "/tasks": "Tasks",
@@ -80,6 +81,11 @@ export async function route() {
     if (path === "/tickets") {
         const { renderTickets } = await import("./tickets.js");
         await renderTickets();
+        return;
+    }
+    if (path === "/communications") {
+        const { renderCommunications } = await import("./communications.js");
+        await renderCommunications();
         return;
     }
     const { renderDashboard } = await import("./dashboard.js");

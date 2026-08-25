@@ -2,7 +2,7 @@ export const ticketStatuses = ["new", "open", "in_progress", "pending", "resolve
 export type TicketStatus = (typeof ticketStatuses)[number];
 export const ticketPriorities = ["low", "medium", "high", "urgent"] as const;
 export type TicketPriority = (typeof ticketPriorities)[number];
-export const ticketHistoryActions = ["created", "updated", "status_changed", "priority_changed", "assignment_changed", "escalated"] as const;
+export const ticketHistoryActions = ["created", "updated", "status_changed", "priority_changed", "assignment_changed", "escalated", "communication_received"] as const;
 export type TicketHistoryAction = (typeof ticketHistoryActions)[number];
 
 export type CreateTicketInput = {

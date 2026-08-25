@@ -7,7 +7,9 @@ const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as typeof
 export function createDatabase(location = process.env.CRM_DATABASE_PATH ?? join(process.cwd(), "data", "crm.sqlite")) {
   mkdirSync(dirname(location), { recursive: true });
   const database = new DatabaseSync(location);
-  database.exec(`PRAGMA foreign_keys = ON;
+  database.exec(`PRAGMA busy_timeout = 5000;
+  PRAGMA journal_mode = WAL;
+  PRAGMA foreign_keys = ON;
   CREATE TABLE IF NOT EXISTS customers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     first_name TEXT NOT NULL,
@@ -69,5 +71,10 @@ export function createDatabase(location = process.env.CRM_DATABASE_PATH ?? join(
     changed_by TEXT NOT NULL, created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS ticket_history_ticket_idx ON ticket_history (ticket_id, created_at DESC, id DESC);`);
+  database.exec(`CREATE TABLE IF NOT EXISTS communication_channels (type TEXT PRIMARY KEY, display_name TEXT NOT NULL, is_enabled INTEGER NOT NULL DEFAULT 1);
+  CREATE TABLE IF NOT EXISTS customer_communications (id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL REFERENCES customers(id), ticket_id INTEGER REFERENCES support_tickets(id) ON DELETE SET NULL, channel_type TEXT NOT NULL REFERENCES communication_channels(type), message TEXT NOT NULL, source_reference TEXT, received_at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS customer_communications_customer_idx ON customer_communications (customer_id, received_at DESC, id DESC);
+  CREATE INDEX IF NOT EXISTS customer_communications_ticket_idx ON customer_communications (ticket_id, received_at DESC, id DESC);
+  INSERT OR IGNORE INTO communication_channels (type, display_name) VALUES ('email','Email'),('whatsapp','WhatsApp'),('live_chat','Live Chat'),('sms','SMS'),('web_form','Web Form');`);
   return database;
 }

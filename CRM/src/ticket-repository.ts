@@ -18,13 +18,13 @@ export class TicketRepository {
   private history(ticketId: number, action: TicketHistoryAction, oldValue: string | null, newValue: string | null, changedBy: string, now: string) { this.database.prepare("INSERT INTO ticket_history (ticket_id, action, old_value, new_value, changed_by, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(ticketId, action, oldValue, newValue, changedBy, now); }
 
   createTicket(input: CreateTicketInput, changedBy: string): SupportTicket {
-    const now = new Date().toISOString(); this.database.exec("BEGIN");
+    const now = new Date().toISOString(); this.database.exec("SAVEPOINT create_ticket");
     try {
       const result = this.database.prepare("INSERT INTO support_tickets (ticket_number, customer_id, subject, description, category, priority, assigned_agent, status, due_date, is_escalated, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)").run("", input.customerId, input.subject, input.description, input.category, input.priority, input.assignedAgent, input.status, input.dueDate, now, now);
       const id = Number(result.lastInsertRowid); const ticketNumber = `TKT-${String(id).padStart(6, "0")}`;
       this.database.prepare("UPDATE support_tickets SET ticket_number = ? WHERE id = ?").run(ticketNumber, id);
-      this.history(id, "created", null, ticketNumber, changedBy, now); this.database.exec("COMMIT"); return this.getTicket(id)!;
-    } catch (error) { this.database.exec("ROLLBACK"); throw error; }
+      this.history(id, "created", null, ticketNumber, changedBy, now); this.database.exec("RELEASE SAVEPOINT create_ticket"); return this.getTicket(id)!;
+    } catch (error) { this.database.exec("ROLLBACK TO SAVEPOINT create_ticket"); this.database.exec("RELEASE SAVEPOINT create_ticket"); throw error; }
   }
   listTickets(page = 1, pageSize = 10, filters: TicketFilters = {}): TicketPage {
     const safePage = Math.max(1, Math.floor(page)), safeSize = Math.min(50, Math.max(1, Math.floor(pageSize)));
@@ -52,6 +52,9 @@ export class TicketRepository {
   escalateTicket(id: number, changedBy: string): SupportTicket | null {
     const ticket = this.getTicket(id); if (!ticket) return null; if (ticket.isEscalated) return ticket; const now = new Date().toISOString(); this.database.exec("BEGIN");
     try { this.database.prepare("UPDATE support_tickets SET is_escalated = 1, updated_at = ? WHERE id = ?").run(now, id); this.history(id, "escalated", "false", "true", changedBy, now); this.database.exec("COMMIT"); return this.getTicket(id); } catch (error) { this.database.exec("ROLLBACK"); throw error; }
+  }
+  addCommunicationHistory(ticketId: number, communicationId: number, changedBy: string) {
+    this.history(ticketId, "communication_received", null, String(communicationId), changedBy, new Date().toISOString());
   }
   listHistory(ticketId: number): TicketHistoryEntry[] { return (this.database.prepare("SELECT * FROM ticket_history WHERE ticket_id = ? ORDER BY created_at DESC, id DESC").all(ticketId) as Row[]).map(mapHistory); }
 }

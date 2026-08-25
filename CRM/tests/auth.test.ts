@@ -22,6 +22,13 @@ describe("login", () => {
     expect(response.headers["set-cookie"][0]).toContain("HttpOnly");
   });
 
+  it("authenticates a separately seeded support agent", async () => {
+    await auth.seedUser("agent@example.com", "Password123!");
+    const response = await request(createApp(auth)).post("/api/login").send({ email: "agent@example.com", password: "Password123!" });
+    expect(response.status).toBe(200);
+    expect(response.body.user.email).toBe("agent@example.com");
+  });
+
   it("returns the same error for an unknown user and wrong password", async () => {
     const wrongPassword = await request(createApp(auth)).post("/api/login").send({ email: "demo@example.com", password: "wrong" });
     const unknownUser = await request(createApp(auth)).post("/api/login").send({ email: "nobody@example.com", password: "wrong" });

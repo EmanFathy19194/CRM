@@ -11,3 +11,4 @@ One row per feature folder under `.squad/plans/`. `NN` continues as a global exe
 | view-customers-list | [view-customers-list/00-overview.md](view-customers-list/00-overview.md) | 05 |
 | customer-details | [customer-details/00-overview.md](customer-details/00-overview.md) | 06 |
 | manage-support-tickets | [manage-support-tickets/00-overview.md](manage-support-tickets/00-overview.md) | 08 |
+| manage-communication-channels | [manage-communication-channels/00-overview.md](manage-communication-channels/00-overview.md) | 09 |
