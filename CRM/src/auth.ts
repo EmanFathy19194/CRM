@@ -4,7 +4,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { LoginCredentials, validateLogin } from "./validation.js";
 
-export type PublicUser = { id: string; email: string };
+export const userRoles = ["admin", "agent"] as const;
+export type UserRole = typeof userRoles[number];
+export type PublicUser = { id: string; email: string; role: UserRole };
 
 type User = PublicUser & { passwordHash: string };
 
@@ -16,7 +18,9 @@ export class AuthService {
     if (!sessionPath || !existsSync(sessionPath)) return;
     try {
       const stored = JSON.parse(readFileSync(sessionPath, "utf8")) as Record<string, { user: PublicUser; expiresAt: number }>;
-      for (const [token, session] of Object.entries(stored)) if (session.expiresAt > Date.now()) this.sessions.set(token, session);
+      for (const [token, session] of Object.entries(stored)) {
+        if (session.expiresAt > Date.now()) this.sessions.set(token, { ...session, user: { ...session.user, role: session.user.role === "admin" ? "admin" : "agent" } });
+      }
       this.persistSessions();
     } catch { /* A malformed local session file is treated as an empty session store. */ }
   }
@@ -28,11 +32,12 @@ export class AuthService {
     writeFileSync(this.sessionPath, JSON.stringify(active), "utf8");
   }
 
-  async seedUser(email: string, password: string): Promise<void> {
+  async seedUser(email: string, password: string, role: UserRole = "admin"): Promise<void> {
     const normalizedEmail = email.trim().toLowerCase();
     this.users.set(normalizedEmail, {
       id: randomUUID(),
       email: normalizedEmail,
+      role,
       passwordHash: await bcrypt.hash(password, 12)
     });
   }
@@ -43,9 +48,9 @@ export class AuthService {
     if (!user || !(await bcrypt.compare(credentials.password, user.passwordHash))) return null;
 
     const token = randomUUID();
-    this.sessions.set(token, { user: { id: user.id, email: user.email }, expiresAt: Date.now() + 60 * 60 * 1000 });
+    this.sessions.set(token, { user: { id: user.id, email: user.email, role: user.role }, expiresAt: Date.now() + 60 * 60 * 1000 });
     this.persistSessions();
-    return { token, user: { id: user.id, email: user.email } };
+    return { token, user: { id: user.id, email: user.email, role: user.role } };
   }
 
   getUser(token: string | undefined): PublicUser | null {

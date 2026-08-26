@@ -18,15 +18,38 @@ describe("login", () => {
     const response = await request(createApp(auth)).post("/api/login").send({ email: "demo@example.com", password: "Password123!" });
     expect(response.status).toBe(200);
     expect(response.body.user.email).toBe("demo@example.com");
+    expect(response.body.user.role).toBe("admin");
     expect(response.body.user).not.toHaveProperty("passwordHash");
     expect(response.headers["set-cookie"][0]).toContain("HttpOnly");
   });
 
   it("authenticates a separately seeded support agent", async () => {
-    await auth.seedUser("agent@example.com", "Password123!");
+    await auth.seedUser("agent@example.com", "Password123!", "agent");
     const response = await request(createApp(auth)).post("/api/login").send({ email: "agent@example.com", password: "Password123!" });
     expect(response.status).toBe(200);
     expect(response.body.user.email).toBe("agent@example.com");
+    expect(response.body.user.role).toBe("agent");
+  });
+
+  it("limits an agent to agent work and tickets assigned to that agent", async () => {
+    await auth.seedUser("agent@example.com", "Password123!", "agent");
+    await auth.seedUser("other@example.com", "Password123!", "agent");
+    const repository = new CustomerRepository(createDatabase(":memory:"));
+    const app = createApp(auth, repository);
+    const admin = request.agent(app);
+    const agent = request.agent(app);
+    await admin.post("/api/login").send({ email: "demo@example.com", password: "Password123!" });
+    await agent.post("/api/login").send({ email: "agent@example.com", password: "Password123!" });
+    const customer = await admin.post("/api/customers").send({ firstName: "Ada", lastName: "Lovelace", email: "ada@example.com", status: "active" });
+    const mine = await admin.post("/api/tickets").send({ customerId: customer.body.id, subject: "My ticket", description: "Details", category: "Support", priority: "medium", assignedAgent: "agent@example.com", status: "open", dueDate: null });
+    const other = await admin.post("/api/tickets").send({ customerId: customer.body.id, subject: "Other ticket", description: "Details", category: "Support", priority: "medium", assignedAgent: "other@example.com", status: "open", dueDate: null });
+
+    expect((await agent.get("/api/customers")).status).toBe(403);
+    expect((await agent.get("/api/communications")).status).toBe(403);
+    expect((await agent.get(`/api/tickets/${mine.body.id}`)).status).toBe(200);
+    expect((await agent.get(`/api/tickets/${other.body.id}`)).status).toBe(404);
+    expect((await agent.get("/api/tickets")).body.items).toHaveLength(1);
+    expect((await agent.get("/api/dashboard")).body.counts.assigned).toBe(1);
   });
 
   it("returns the same error for an unknown user and wrong password", async () => {

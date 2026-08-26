@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { validateLogin } from "./validation.js";
+export const userRoles = ["admin", "agent"];
 export class AuthService {
     sessionPath;
     users = new Map();
@@ -13,9 +14,10 @@ export class AuthService {
             return;
         try {
             const stored = JSON.parse(readFileSync(sessionPath, "utf8"));
-            for (const [token, session] of Object.entries(stored))
+            for (const [token, session] of Object.entries(stored)) {
                 if (session.expiresAt > Date.now())
-                    this.sessions.set(token, session);
+                    this.sessions.set(token, { ...session, user: { ...session.user, role: session.user.role === "admin" ? "admin" : "agent" } });
+            }
             this.persistSessions();
         }
         catch { /* A malformed local session file is treated as an empty session store. */ }
@@ -27,11 +29,12 @@ export class AuthService {
         mkdirSync(dirname(this.sessionPath), { recursive: true });
         writeFileSync(this.sessionPath, JSON.stringify(active), "utf8");
     }
-    async seedUser(email, password) {
+    async seedUser(email, password, role = "admin") {
         const normalizedEmail = email.trim().toLowerCase();
         this.users.set(normalizedEmail, {
             id: randomUUID(),
             email: normalizedEmail,
+            role,
             passwordHash: await bcrypt.hash(password, 12)
         });
     }
@@ -42,9 +45,9 @@ export class AuthService {
         if (!user || !(await bcrypt.compare(credentials.password, user.passwordHash)))
             return null;
         const token = randomUUID();
-        this.sessions.set(token, { user: { id: user.id, email: user.email }, expiresAt: Date.now() + 60 * 60 * 1000 });
+        this.sessions.set(token, { user: { id: user.id, email: user.email, role: user.role }, expiresAt: Date.now() + 60 * 60 * 1000 });
         this.persistSessions();
-        return { token, user: { id: user.id, email: user.email } };
+        return { token, user: { id: user.id, email: user.email, role: user.role } };
     }
     getUser(token) {
         if (!token)
