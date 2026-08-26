@@ -2,19 +2,22 @@ import { escapeHtml, renderProtectedShell } from "./shared.js";
 
 type Channel = { type: string; displayName: string; isEnabled: boolean };
 type Customer = { id: number; firstName: string; lastName: string; email: string };
+type Ticket = { id:number; ticketNumber:string; customerId:number; subject:string };
 type Communication = { id: number; customerId: number; ticketId: number | null; channel: string; message: string; sourceReference: string | null; receivedAt: string };
 
 export async function renderCommunications() {
   renderProtectedShell(`<div id="page-content"><div class="customer-loading"><span class="loading-orb"></span><p>Loading communications...</p></div></div>`, "/communications");
   const content = document.querySelector<HTMLDivElement>("#page-content")!;
-  const [channelsResponse, customersResponse, communicationsResponse] = await Promise.all([
+  const [channelsResponse, customersResponse, communicationsResponse, ticketsResponse] = await Promise.all([
     fetch("/api/communication-channels", { credentials: "same-origin" }),
     fetch("/api/customers?pageSize=50", { credentials: "same-origin" }),
-    fetch("/api/communications", { credentials: "same-origin" })
+    fetch("/api/communications", { credentials: "same-origin" }),
+    fetch("/api/tickets?pageSize=50", { credentials: "same-origin" })
   ]);
   if (!channelsResponse.ok) { content.innerHTML = `<div class="customer-error"><strong>We could not load communication channels.</strong></div>`; return; }
   const channels = await channelsResponse.json() as Channel[];
   const customers = customersResponse.ok ? (await customersResponse.json() as { items: Customer[] }).items : [];
+  const tickets = ticketsResponse.ok ? (await ticketsResponse.json() as { items: Ticket[] }).items : [];
   let communications = communicationsResponse.ok ? await communicationsResponse.json() as Communication[] : [];
   const customerName = (id: number) => { const customer = customers.find((item) => item.id === id); return customer ? `${customer.firstName} ${customer.lastName}` : `Customer #${id}`; };
 
@@ -27,7 +30,7 @@ export async function renderCommunications() {
       <div class="customer-fields">
         <label>Customer *<select name="customerId" required><option value="">Choose customer</option>${customers.map((customer) => `<option value="${customer.id}">${escapeHtml(customer.firstName)} ${escapeHtml(customer.lastName)} — ${escapeHtml(customer.email)}</option>`).join("")}</select></label>
         <label>Channel *<select name="channel" required><option value="">Choose channel</option>${channels.filter((channel) => channel.isEnabled && channel.type !== "web_form").map((channel) => `<option value="${escapeHtml(channel.type)}">${escapeHtml(channel.displayName)}</option>`).join("")}</select></label>
-        <label>Ticket id <input name="ticketId" type="number" min="1" placeholder="Optional existing ticket id" /></label>
+        <label>Ticket <select name="ticketId"><option value="">Create a new ticket</option>${tickets.map((ticket) => `<option value="${ticket.id}">${escapeHtml(ticket.ticketNumber)} — ${escapeHtml(ticket.subject)}</option>`).join("")}</select></label>
         <label>Source reference <input name="sourceReference" maxlength="200" placeholder="Optional reference" /></label>
         <label class="wide-field">Incoming message *<textarea name="message" maxlength="2000" required></textarea></label>
       </div>

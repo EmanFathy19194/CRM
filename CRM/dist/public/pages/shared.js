@@ -6,7 +6,8 @@ export const protectedPages = {
     "/contacts": "Contacts",
     "/opportunities": "Opportunities",
     "/tasks": "Tasks",
-    "/activities": "Activities"
+    "/activities": "Activities",
+    "/automation": "Automation"
 };
 let currentRole = "agent";
 export function escapeHtml(value) {
@@ -89,6 +90,11 @@ export async function route() {
     if (path === "/communications") {
         const { renderCommunications } = await import("./communications.js");
         await renderCommunications();
+        return;
+    }
+    if (path === "/automation") {
+        const { renderAutomation } = await import("./automation.js");
+        await renderAutomation();
         return;
     }
     if (path === "/tasks") {

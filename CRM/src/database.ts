@@ -71,6 +71,37 @@ export function createDatabase(location = process.env.CRM_DATABASE_PATH ?? join(
     changed_by TEXT NOT NULL, created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS ticket_history_ticket_idx ON ticket_history (ticket_id, created_at DESC, id DESC);`);
+  try { database.exec(`ALTER TABLE support_tickets ADD COLUMN sla_rule_id INTEGER;`); } catch { /* Existing databases already have the column. */ }
+  try { database.exec(`ALTER TABLE support_tickets ADD COLUMN response_target_minutes INTEGER;`); } catch { /* Existing databases already have the column. */ }
+  try { database.exec(`ALTER TABLE support_tickets ADD COLUMN response_due_at TEXT;`); } catch { /* Existing databases already have the column. */ }
+  try { database.exec(`ALTER TABLE support_tickets ADD COLUMN response_responded_at TEXT;`); } catch { /* Existing databases already have the column. */ }
+  try { database.exec(`ALTER TABLE support_tickets ADD COLUMN resolution_target_minutes INTEGER;`); } catch { /* Existing databases already have the column. */ }
+  try { database.exec(`ALTER TABLE support_tickets ADD COLUMN resolution_due_at TEXT;`); } catch { /* Existing databases already have the column. */ }
+  database.exec(`CREATE TABLE IF NOT EXISTS sla_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, priority TEXT, category TEXT,
+    response_target_minutes INTEGER NOT NULL CHECK (response_target_minutes > 0),
+    resolution_target_minutes INTEGER NOT NULL CHECK (resolution_target_minutes > 0),
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS sla_rules_match_idx ON sla_rules (priority, category, id);
+  CREATE TABLE IF NOT EXISTS automation_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, priority TEXT, category TEXT,
+    action TEXT NOT NULL CHECK (action IN ('assign', 'escalate')), assigned_agent TEXT,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    CHECK ((action = 'assign' AND assigned_agent IS NOT NULL) OR (action = 'escalate' AND assigned_agent IS NULL))
+  );
+  CREATE INDEX IF NOT EXISTS automation_rules_match_idx ON automation_rules (priority, category, id);
+  CREATE TABLE IF NOT EXISTS agent_notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, recipient_email TEXT NOT NULL, ticket_id INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL, message TEXT NOT NULL, dismissed_at TEXT, created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS agent_notifications_owner_idx ON agent_notifications (recipient_email, dismissed_at, created_at DESC, id DESC);
+  CREATE TABLE IF NOT EXISTS ticket_sla_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+    deadline_kind TEXT NOT NULL CHECK (deadline_kind IN ('response', 'resolution')),
+    event_kind TEXT NOT NULL CHECK (event_kind IN ('warning', 'breach')),
+    created_at TEXT NOT NULL, UNIQUE (ticket_id, deadline_kind, event_kind)
+  );`);
   database.exec(`CREATE TABLE IF NOT EXISTS communication_channels (type TEXT PRIMARY KEY, display_name TEXT NOT NULL, is_enabled INTEGER NOT NULL DEFAULT 1);
   CREATE TABLE IF NOT EXISTS customer_communications (id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL REFERENCES customers(id), ticket_id INTEGER REFERENCES support_tickets(id) ON DELETE SET NULL, channel_type TEXT NOT NULL REFERENCES communication_channels(type), message TEXT NOT NULL, source_reference TEXT, received_at TEXT NOT NULL);
   CREATE INDEX IF NOT EXISTS customer_communications_customer_idx ON customer_communications (customer_id, received_at DESC, id DESC);

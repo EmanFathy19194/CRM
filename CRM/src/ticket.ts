@@ -2,7 +2,7 @@ export const ticketStatuses = ["new", "open", "in_progress", "pending", "resolve
 export type TicketStatus = (typeof ticketStatuses)[number];
 export const ticketPriorities = ["low", "medium", "high", "urgent"] as const;
 export type TicketPriority = (typeof ticketPriorities)[number];
-export const ticketHistoryActions = ["created", "updated", "status_changed", "priority_changed", "assignment_changed", "escalated", "communication_received", "internal_comment_added"] as const;
+export const ticketHistoryActions = ["created", "updated", "status_changed", "priority_changed", "assignment_changed", "escalated", "communication_received", "internal_comment_added", "sla_warning", "sla_breached", "automatically_assigned", "automatically_escalated", "responded"] as const;
 export type TicketHistoryAction = (typeof ticketHistoryActions)[number];
 
 export type CreateTicketInput = {
@@ -24,6 +24,12 @@ export type SupportTicket = CreateTicketInput & {
   updatedAt: string;
   customerName: string;
   customerEmail: string;
+  slaRuleId: number | null;
+  responseTargetMinutes: number | null;
+  responseDueAt: string | null;
+  responseRespondedAt: string | null;
+  resolutionTargetMinutes: number | null;
+  resolutionDueAt: string | null;
 };
 
 export type TicketHistoryEntry = {
