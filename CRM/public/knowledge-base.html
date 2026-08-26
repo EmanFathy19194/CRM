@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Knowledge Base</title>
+    <script type="module" src="/knowledge-base.js" defer></script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+      :root { font-family: 'DM Sans', sans-serif; color: #f7f8f2; background: #111827; }
+      * { box-sizing: border-box; }
+      body { min-height: 100vh; margin: 0; background: #111827; }
+      body::before { position: fixed; inset: 0; z-index: -1; background: radial-gradient(circle at 10% 15%, #ef835455 0 12%, transparent 31%), radial-gradient(circle at 90% 85%, #5ec8b055 0 10%, transparent 28%), linear-gradient(135deg, #17233b 0%, #111827 52%, #192d31 100%); content: ''; }
+      body::after { position: fixed; inset: 0; z-index: -1; opacity: .16; background-image: linear-gradient(#ffffff 1px, transparent 1px), linear-gradient(90deg, #ffffff 1px, transparent 1px); background-size: 42px 42px; mask-image: linear-gradient(to bottom, black, transparent 80%); content: ''; }
+      .container { max-width: 960px; margin: 0 auto; padding: 56px 20px; }
+      header { margin-bottom: 32px; }
+      .brand { display: flex; align-items: center; gap: 12px; font-family: 'Space Grotesk', sans-serif; font-size: 1.05rem; font-weight: 700; letter-spacing: .02em; margin-bottom: 18px; }
+      .brand-mark { display: grid; width: 30px; height: 30px; place-items: center; color: #1d2337; border-radius: 9px; background: #f4d35e; box-shadow: 3px 3px 0 #1d233755; }
+      .brand-mark::before { width: 11px; height: 11px; border: 2.5px solid #1d2337; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); content: ''; }
+      h1 { margin: 0 0 10px; font-family: 'Space Grotesk', sans-serif; font-size: clamp(2rem, 4vw, 2.65rem); letter-spacing: -.04em; }
+      .intro { margin: 0 0 28px; color: #9ba9bf; line-height: 1.5; }
+      .toolbar { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin-bottom: 20px; flex-wrap: wrap; }
+      .search-field { flex: 1; max-width: 440px; margin: 0; }
+      .filter-field { width: 160px; margin: 0; }
+      label { display: block; margin: 0 0 8px; color: #dbe5f2; font-size: .86rem; font-weight: 600; }
+      input, select, button, textarea { width: 100%; padding: 14px 15px; font: inherit; }
+      input, select, textarea { color: #f7f8f2; border: 1px solid #536178; border-radius: 10px; outline: none; background: #1b263b; transition: border-color .2s, box-shadow .2s, background .2s; }
+      input::placeholder { color: #718198; }
+      input:focus, select:focus, textarea:focus { border-color: #f4d35e; background: #202e46; box-shadow: 0 0 0 4px #f4d35e1f; }
+      button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; color: #202337; border: 0; border-radius: 10px; background: #f4d35e; cursor: pointer; font-weight: 700; box-shadow: 0 10px 24px #f4d35e20; transition: transform .2s, background .2s, box-shadow .2s; }
+      button:hover:not(:disabled) { background: #ffe48a; box-shadow: 0 14px 28px #f4d35e35; transform: translateY(-2px); }
+      button:disabled { cursor: wait; opacity: .65; }
+      .secondary { color: #c5d0df; border: 1px solid #536178; background: transparent; box-shadow: none; }
+      .secondary:hover { background: #ffffff08; box-shadow: none; transform: none; }
+      article { padding: 18px; border: 1px solid #ffffff12; border-radius: 12px; background: #172239; margin-bottom: 12px; }
+      article h2 { margin: 0 0 6px; font-family: 'Space Grotesk', sans-serif; font-size: 1.15rem; }
+      article p { margin: 0; color: #9ba9bf; }
+      small { color: #718198; }
+      .error { color: #ff9b8a; min-height: 22px; margin-top: 10px; font-size: .86rem; }
+      .success { color: #a7f3d0; }
+      a { color: #f4d35e; }
+      [hidden] { display: none; }
+      .detail-article { margin-top: 18px; }
+      .detail-article h1 { margin: 0 0 14px; }
+      .detail-article .meta { color: #9ba9bf; font-size: .9rem; margin-bottom: 18px; }
+      .detail-article .body { color: #dbe5f2; line-height: 1.6; white-space: pre-wrap; }
+      @media (max-width: 720px) { .toolbar { flex-direction: column; align-items: stretch; } .search-field, .filter-field { max-width: none; } }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Northstar CRM</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap"><h1>Knowledge Base</h1><a href="/portal">Back to customer portal</a></div>
+        <p class="intro">Find answers, guides, and solutions.</p>
+      </header>
+      <div class="toolbar">
+        <div class="search-field">
+          <input id="search" placeholder="Search articles…" />
+        </div>
+        <div class="filter-field">
+          <select id="type">
+            <option value="">All types</option>
+            <option value="faq">FAQs</option>
+            <option value="help">Help</option>
+            <option value="solution">Solutions</option>
+            <option value="guide">Guides</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <select id="category">
+            <option value="">All categories</option>
+          </select>
+        </div>
+        <button id="go">Search</button>
+      </div>
+      <main id="results" aria-live="polite">Loading…</main>
+    </div>
+  </body>
+</html>

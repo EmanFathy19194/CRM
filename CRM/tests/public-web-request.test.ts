@@ -14,15 +14,18 @@ describe("public web requests", () => {
   }
   const payload = { email: "ada@example.com", subject: "Printer broken", message: "It will not print.", category: "Hardware", dueDate: "2026-10-01" };
 
-  it("creates a ticket plus web_form communication and returns only the ticket number", async () => {
+  it("creates a ticket plus web_form communication and returns only the ticket number and portal url", async () => {
     const repository = new CustomerRepository(createDatabase(":memory:"));
     await repository.createCustomer({ firstName: "Ada", lastName: "Lovelace", email: "ada@example.com", phone: "", company: "", jobTitle: "", status: "active", address: "", notes: "" });
     const agent = request.agent(createApp(auth, repository));
     await agent.post("/api/login").send({ email: "agent@example.com", password: "Password123!" });
     const response = await agent.post("/api/public/web-requests").send(payload);
     expect(response.status).toBe(201);
-    expect(Object.keys(response.body)).toEqual(["ticketNumber"]);
+    expect(Object.keys(response.body)).toEqual(["ticketNumber", "portalUrl"]);
     expect(response.body.ticketNumber).toBe("TKT-000001");
+    expect(response.body.portalUrl).toBe(`/portal?ticket=TKT-000001`);
+    expect(response.body).not.toHaveProperty("customerId");
+    expect(response.body).not.toHaveProperty("email");
     const ticket = (await agent.get("/api/tickets/1")).body;
     expect(ticket.status).toBe("new"); expect(ticket.priority).toBe("medium"); expect(ticket.assignedAgent).toBe("Unassigned");
     const communications = (await agent.get("/api/tickets/1/communications")).body;

@@ -7,7 +7,8 @@ export const protectedPages = {
     "/opportunities": "Opportunities",
     "/tasks": "Tasks",
     "/activities": "Activities",
-    "/automation": "Automation"
+    "/automation": "Automation",
+    "/admin/knowledge-base": "Knowledge Base"
 };
 let currentRole = "agent";
 export function escapeHtml(value) {
@@ -27,7 +28,7 @@ export function showDialog(options) {
     });
 }
 export function renderSidebar(currentPath) {
-    const visiblePages = currentRole === "admin" ? protectedPages : Object.fromEntries(Object.entries(protectedPages).filter(([path]) => ["/dashboard", "/tickets", "/tasks", "/activities"].includes(path)));
+    const visiblePages = currentRole === "admin" ? protectedPages : currentRole === "customer" ? Object.fromEntries(Object.entries(protectedPages).filter(([path]) => ["/dashboard", "/tickets"].includes(path))) : Object.fromEntries(Object.entries(protectedPages).filter(([path]) => ["/dashboard", "/tickets", "/tasks", "/activities"].includes(path)));
     const links = Object.entries(visiblePages).map(([path, label]) => `<a class="nav-link${path === currentPath ? " active" : ""}" href="${path}"><span class="nav-dot" aria-hidden="true"></span>${label}</a>`).join("");
     return `<aside class="sidebar"><div class="sidebar-brand"><span class="brand-mark" aria-hidden="true"></span><span>Northstar CRM</span></div><div class="sidebar-label">Workspace</div><nav class="crm-nav" aria-label="CRM sections">${links}</nav><div class="sidebar-footer"><span class="signal"><i aria-hidden="true"></i><span>Workspace online</span></span><button class="logout-button" id="logout"><span>Log out</span><span aria-hidden="true">&#8594;</span></button></div></aside>`;
 }
@@ -67,6 +68,10 @@ export async function route() {
         return;
     }
     currentRole = (await authResponse.json()).user.role;
+    if (currentRole === "customer" && !["/dashboard", "/tickets"].includes(path)) {
+        history.replaceState({}, "", "/dashboard");
+        return void route();
+    }
     if (/^\/customers\/\d+$/.test(path)) {
         const { renderCustomerDetails } = await import("./customer-details.js");
         await renderCustomerDetails(Number(path.split("/")[2]));
@@ -100,6 +105,11 @@ export async function route() {
     if (path === "/tasks") {
         const { renderTasks } = await import("./tasks.js");
         await renderTasks();
+        return;
+    }
+    if (path === "/admin/knowledge-base") {
+        const { renderKnowledgeBase } = await import("./knowledge-base.js");
+        await renderKnowledgeBase();
         return;
     }
     const { renderDashboard } = await import("./dashboard.js");

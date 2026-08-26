@@ -20,15 +20,18 @@ import { AgentWorkRepository } from "./agent-work-repository.js";
 import { validateComment, validateReminder, validateTask } from "./agent-work-validation.js";
 import { AutomationRepository } from "./automation-repository.js";
 import { validateAutomationRule, validateSlaRule } from "./automation-validation.js";
+import { KnowledgeBaseRepository } from "./knowledge-base-repository.js";
+import { CustomerPortalRepository } from "./customer-portal-repository.js";
+import { validateKnowledgeArticle, validatePortalAccess, validateTicketFeedback } from "./knowledge-base-validation.js";
 
 const cookieName = "crm_session";
 const projectRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const uploadDirectory = process.env.CRM_UPLOAD_DIR ?? join(projectRoot, "data", "uploads");
 mkdirSync(uploadDirectory, { recursive: true });
-const protectedPagePaths = ["/dashboard", "/customers", "/tickets", "/communications", "/contacts", "/opportunities", "/tasks", "/activities", "/automation"];
+const protectedPagePaths = ["/dashboard", "/customers", "/tickets", "/communications", "/contacts", "/opportunities", "/tasks", "/activities", "/automation", "/admin/knowledge-base"];
 const customerDetailsPagePath = /^\/customers\/\d+$/;
 const ticketDetailsPagePath = /^\/tickets\/\d+$/;
-const protectedApiPaths = ["/api/customers", "/api/tickets", "/api/communications", "/api/communication-channels", "/api/dashboard", "/api/tasks", "/api/reminders", "/api/contacts", "/api/opportunities", "/api/activities", "/api/sla-rules", "/api/automation-rules", "/api/notifications"];
+const protectedApiPaths = ["/api/customers", "/api/tickets", "/api/communications", "/api/communication-channels", "/api/dashboard", "/api/tasks", "/api/reminders", "/api/contacts", "/api/opportunities", "/api/activities", "/api/sla-rules", "/api/automation-rules", "/api/notifications", "/api/articles"];
 const upload = multer({ dest: uploadDirectory, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: (_request, file, callback) => callback(null, /^[a-zA-Z0-9._ -]+$/.test(file.originalname)) });
 
 function readCookie(request: Request, name: string): string | undefined {
@@ -50,6 +53,8 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
   const communicationRepository = new CommunicationRepository(customerRepository.getDatabase());
   const agentWorkRepository = new AgentWorkRepository(customerRepository.getDatabase());
   const automationRepository = new AutomationRepository(customerRepository.getDatabase(), ticketRepository);
+  const knowledgeBaseRepository = new KnowledgeBaseRepository(customerRepository.getDatabase());
+  const portalRepository = new CustomerPortalRepository(customerRepository.getDatabase());
   const app = express();
   app.use(express.json({ limit: "10kb" }));
 
@@ -242,6 +247,20 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
       return response.status(201).json(communication);
     } catch { try { database.exec("ROLLBACK"); } catch { /* no open transaction */ } return response.status(500).json({ error: "Unable to record communication." }); }
   });
+  app.get("/api/articles", (request,response) => { if(!isAdmin(request,auth)) return response.status(403).json({error:"Administrator access required."}); return response.json(knowledgeBaseRepository.list(Number(request.query.page??1),Number(request.query.pageSize??10),false,String(request.query.search??""),String(request.query.type??""),String(request.query.category??""))); });
+  app.post("/api/articles", (request,response) => { if(!isAdmin(request,auth)) return response.status(403).json({error:"Administrator access required."});const result=validateKnowledgeArticle(request.body??{});if(Object.keys(result.errors).length)return response.status(400).json({errors:result.errors});return response.status(201).json(knowledgeBaseRepository.create(result.value)); });
+  app.get("/api/articles/:id", (request,response) => { if(!isAdmin(request,auth)) return response.status(403).json({error:"Administrator access required."});const id=parsePositiveInteger(request.params.id);if(!id)return response.status(400).json({error:"Invalid article id."});const item=knowledgeBaseRepository.get(id);return item?response.json(item):response.status(404).json({error:"Article not found."}); });
+  app.patch("/api/articles/:id", (request,response) => { if(!isAdmin(request,auth)) return response.status(403).json({error:"Administrator access required."});const id=parsePositiveInteger(request.params.id),result=validateKnowledgeArticle(request.body??{});if(!id)return response.status(400).json({error:"Invalid article id."});if(Object.keys(result.errors).length)return response.status(400).json({errors:result.errors});const item=knowledgeBaseRepository.update(id,result.value);return item?response.json(item):response.status(404).json({error:"Article not found."}); });
+  app.delete("/api/articles/:id", (request,response) => { if(!isAdmin(request,auth)) return response.status(403).json({error:"Administrator access required."});const id=parsePositiveInteger(request.params.id);if(!id)return response.status(400).json({error:"Invalid article id."});return knowledgeBaseRepository.delete(id)?response.status(204).send():response.status(404).json({error:"Article not found."}); });
+  app.get("/api/public/articles", (request,response) => response.json(knowledgeBaseRepository.list(Number(request.query.page??1),Number(request.query.pageSize??10),true,String(request.query.search??""),String(request.query.type??""),String(request.query.category??""))));
+  app.get("/api/public/articles/:id", (request,response) => { const id=parsePositiveInteger(request.params.id);if(!id)return response.status(404).json({error:"Article not found."});const item=knowledgeBaseRepository.get(id,true);return item?response.json(item):response.status(404).json({error:"Article not found."}); });
+  function portalCustomer(request:Request,response:Response){const token=readCookie(request,"crm_portal");const customer=token?portalRepository.customerForToken(token):null;if(customer)return customer;const user=getAuthenticatedUser(request,auth);if(user?.role==="customer"){const record=customerRepository.getCustomerByEmail(user.email);if(record)return record.id;}response.status(401).json({error:"Portal verification required."});return null;}
+  app.post("/api/public/portal-sessions",(request,response)=>{const result=validatePortalAccess(request.body??{});if(Object.keys(result.errors).length)return response.status(400).json({errors:result.errors});const customer=portalRepository.verify(result.value.email,result.value.ticketNumber);if(!customer)return response.status(404).json({error:"Portal record not found."});response.cookie("crm_portal",portalRepository.createSession(customer),{httpOnly:true,sameSite:"lax",secure:process.env.NODE_ENV==="production",maxAge:3600000,path:"/"});return response.status(201).json({ok:true});});
+  app.delete("/api/public/portal-sessions",(request,response)=>{const token=readCookie(request,"crm_portal");if(token)portalRepository.revoke(token);response.clearCookie("crm_portal",{httpOnly:true,sameSite:"lax",path:"/"});return response.status(204).send();});
+  app.get("/api/public/portal/tickets",(request,response)=>{const customer=portalCustomer(request,response);return customer?response.json(portalRepository.list(customer)):undefined;});
+  app.get("/api/public/portal/tickets/:ticketNumber",(request,response)=>{const customer=portalCustomer(request,response);if(!customer)return;const ticket=portalRepository.get(customer,String(request.params.ticketNumber).toUpperCase());return ticket?response.json(ticket):response.status(404).json({error:"Ticket not found."});});
+  app.get("/api/public/portal/tickets/:ticketNumber/history",(request,response)=>{const customer=portalCustomer(request,response);if(!customer)return;const ticket=portalRepository.get(customer,String(request.params.ticketNumber).toUpperCase());return ticket?response.json(portalRepository.history(customer,ticket.ticketNumber)):response.status(404).json({error:"Ticket not found."});});
+  app.post("/api/public/portal/tickets/:ticketNumber/feedback",(request,response)=>{const customer=portalCustomer(request,response);if(!customer)return;const result=validateTicketFeedback(request.body??{});if(Object.keys(result.errors).length)return response.status(400).json({errors:result.errors});const outcome=portalRepository.feedback(customer,String(request.params.ticketNumber).toUpperCase(),result.value);return outcome==="created"?response.status(201).json({ok:true}):outcome==="exists"?response.status(409).json({error:"Feedback has already been submitted."}):response.status(404).json({error:"Ticket not found."});});
   app.post("/api/public/web-requests", (request, response) => {
     const { value, errors } = validatePublicWebRequest(request.body ?? {});
     if (Object.keys(errors).length) return response.status(400).json({ errors });
@@ -255,7 +274,7 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
       const communication = communicationRepository.create({ customerId: customer.id, ticketId: ticket.id, channel: "web_form", message: value.message, sourceReference: null });
       ticketRepository.addCommunicationHistory(ticket.id, communication.id, "web-form");
       database.exec("COMMIT");
-      return response.status(201).json({ ticketNumber: ticket.ticketNumber });
+      return response.status(201).json({ ticketNumber: ticket.ticketNumber, portalUrl: `/portal?ticket=${ticket.ticketNumber}` });
     } catch { try { database.exec("ROLLBACK"); } catch { /* no open transaction */ } return response.status(500).json({ error: "Unable to submit request." }); }
   });
   app.use(express.static(join(projectRoot, "public")));
@@ -265,9 +284,30 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
     const validationError = validateLogin(credentials);
     if (validationError) return response.status(400).json({ error: validationError });
 
-    const result = await auth.login({ email: credentials.email!, password: credentials.password! });
+    const staffResult = await auth.login({ email: credentials.email!, password: credentials.password! });
+    const result = staffResult ?? (customerRepository.verifyCustomerPassword(credentials.email!, credentials.password!) ? await auth.customerLogin(credentials.email!, credentials.password!) : null);
     if (!result) return response.status(401).json({ error: "Invalid email or password." });
 
+    response.cookie(cookieName, result.token, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 60 * 60 * 1000,
+      path: "/"
+    });
+    return response.json({ user: result.user });
+  });
+
+  app.post("/api/public/customer-login", async (request, response) => {
+    const { email, password } = request.body ?? {};
+    if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password) {
+      return response.status(400).json({ error: "Enter a valid email and password." });
+    }
+    if (!customerRepository.verifyCustomerPassword(email.trim(), password)) {
+      return response.status(401).json({ error: "Invalid email or password." });
+    }
+    const result = await auth.customerLogin(email.trim(), password);
+    if (!result) return response.status(401).json({ error: "Invalid email or password." });
     response.cookie(cookieName, result.token, {
       httpOnly: true,
       sameSite: "lax",
@@ -310,6 +350,9 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
   });
 
   app.get("/support/request", (_request, response) => response.sendFile(join(projectRoot, "public", "support-request.html")));
+  app.get("/knowledge-base", (_request,response) => response.sendFile(join(projectRoot,"public","knowledge-base.html")));
+  app.get("/knowledge-base/:id", (_request,response) => response.sendFile(join(projectRoot,"public","knowledge-base.html")));
+  app.get("/portal", (_request,response) => response.sendFile(join(projectRoot,"public","portal.html")));
 
   app.get("*", (_request, response) => response.sendFile(join(projectRoot, "public", "index.html")));
   return app;
@@ -318,7 +361,10 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
 const auth = new AuthService(process.env.CRM_SESSION_PATH ?? join(projectRoot, "data", "sessions.json"));
 await auth.seedUser("demo@example.com", "Password123!");
 await auth.seedUser("agent@example.com", "Password123!", "agent");
-const app = createApp(auth);
+await auth.seedUser("customer@example.com", "Password123!", "customer");
+const customerRepository = new CustomerRepository(createDatabase());
+customerRepository.createCustomer({ firstName: "Demo", lastName: "Customer", email: "customer@example.com", phone: "", company: "", jobTitle: "", status: "active", address: "", notes: "", password: "Password123!" });
+const app = createApp(auth, customerRepository);
 
 if (process.env.NODE_ENV !== "test") {
   app.listen(Number(process.env.PORT ?? 3000), () => {

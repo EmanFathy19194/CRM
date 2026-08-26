@@ -5,36 +5,55 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Submit a support request</title>
     <style>
+      @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+      :root { font-family: 'DM Sans', sans-serif; color: #f7f8f2; background: #111827; }
       * { box-sizing: border-box; }
-      body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; color: #f7f8f2; background: #0d1526; font-family: 'Segoe UI', system-ui, sans-serif; }
-      main { width: min(100%, 520px); padding: 36px 32px 44px; border: 1px solid #ffffff18; border-radius: 18px; background: #172239; }
-      h1 { margin: 0 0 10px; letter-spacing: -.03em; }
-      p.intro { margin: 0 0 26px; color: #9ba9bf; line-height: 1.5; }
-      label { display: block; margin: 16px 0 8px; color: #dbe5f2; font-size: .86rem; font-weight: 600; }
-      input, textarea { width: 100%; padding: 13px 14px; color: #f7f8f2; border: 1px solid #536178; border-radius: 10px; outline: none; background: #1b263b; font: inherit; }
+      body { min-height: 100vh; margin: 0; background: #111827; }
+      body::before { position: fixed; inset: 0; z-index: -1; background: radial-gradient(circle at 10% 15%, #ef835455 0 12%, transparent 31%), radial-gradient(circle at 90% 85%, #5ec8b055 0 10%, transparent 28%), linear-gradient(135deg, #17233b 0%, #111827 52%, #192d31 100%); content: ''; }
+      body::after { position: fixed; inset: 0; z-index: -1; opacity: .16; background-image: linear-gradient(#ffffff 1px, transparent 1px), linear-gradient(90deg, #ffffff 1px, transparent 1px); background-size: 42px 42px; mask-image: linear-gradient(to bottom, black, transparent 80%); content: ''; }
+      .container { max-width: 520px; margin: 0 auto; padding: 56px 20px; }
+      .brand { display: flex; align-items: center; gap: 12px; font-family: 'Space Grotesk', sans-serif; font-size: 1.05rem; font-weight: 700; letter-spacing: .02em; margin-bottom: 28px; }
+      .brand-mark { display: grid; width: 30px; height: 30px; place-items: center; color: #1d2337; border-radius: 9px; background: #f4d35e; box-shadow: 3px 3px 0 #1d233755; }
+      .brand-mark::before { width: 11px; height: 11px; border: 2.5px solid #1d2337; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); content: ''; }
+      h1 { margin: 0 0 10px; font-family: 'Space Grotesk', sans-serif; font-size: clamp(2rem, 4vw, 2.65rem); letter-spacing: -.04em; }
+      .intro { margin: 0 0 26px; color: #9ba9bf; line-height: 1.5; }
+      .links { margin: 0 0 26px; display: flex; gap: 16px; }
+      .links a { color: #f4d35e; text-decoration: none; font-size: .9rem; }
+      .links a:hover { text-decoration: underline; }
+      label { display: block; margin: 18px 0 8px; color: #dbe5f2; font-size: .86rem; font-weight: 600; }
+      input, select, textarea, button { width: 100%; padding: 14px 15px; font: inherit; }
+      input, select, textarea { color: #f7f8f2; border: 1px solid #536178; border-radius: 10px; outline: none; background: #1b263b; transition: border-color .2s, box-shadow .2s, background .2s; }
+      input::placeholder { color: #718198; }
+      input:focus, select:focus, textarea:focus { border-color: #f4d35e; background: #202e46; box-shadow: 0 0 0 4px #f4d35e1f; }
       textarea { min-height: 120px; resize: vertical; }
-      input:focus, textarea:focus { border-color: #f4d35e; box-shadow: 0 0 0 4px #f4d35e1f; }
-      button { width: 100%; margin-top: 24px; padding: 14px 15px; color: #202337; border: 0; border-radius: 10px; background: #f4d35e; cursor: pointer; font: inherit; font-weight: 700; }
-      button:hover:not(:disabled) { background: #ffe48a; }
+      button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; margin-top: 24px; color: #202337; border: 0; border-radius: 10px; background: #f4d35e; cursor: pointer; font-weight: 700; box-shadow: 0 10px 24px #f4d35e20; transition: transform .2s, background .2s, box-shadow .2s; }
+      button:hover:not(:disabled) { background: #ffe48a; box-shadow: 0 14px 28px #f4d35e35; transform: translateY(-2px); }
       button:disabled { cursor: wait; opacity: .65; }
-      #feedback { min-height: 22px; margin: 14px 0 0; color: #ff9b8a; font-size: .88rem; }
-      #feedback.success { color: #a7f3d0; overflow-wrap: anywhere; }
+      #feedback { min-height: 22px; margin: 14px 0 0; color: #ff9b8a; font-size: .86rem; }
+      #feedback.success { color: #a7f3d0; }
+      #feedback a { color: #f4d35e; }
+      @media (max-width: 720px) { .links { flex-direction: column; gap: 8px; } }
     </style>
     <script type="module" src="/support-request.js" defer></script>
   </head>
   <body>
-    <main>
+    <div class="container">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Northstar CRM</span></div>
       <h1>Submit a support request</h1>
       <p class="intro">Already a customer? Send us your request and we will reply with a support reference.</p>
+      <div class="links">
+        <a href="/portal">Back to customer portal</a> · <a href="/knowledge-base">Search knowledge base</a>
+        <a href="/portal">Customer portal</a>
+      </div>
       <form id="request-form">
         <label>Email <input name="email" type="email" required maxlength="320" /></label>
         <label>Subject <input name="subject" required maxlength="200" /></label>
-        <label>Category <input name="category" maxlength="100" placeholder="Optional" /></label>
+        <label>Category <select name="category"><option value="">Choose category (optional)</option><option>Access</option><option>Account</option><option>Billing</option><option>Communication</option><option>Support</option><option>Technical</option><option>Other</option></select></label>
         <label>Due date <input name="dueDate" type="date" /></label>
         <label>Message <textarea name="message" required maxlength="2000"></textarea></label>
         <button type="submit">Submit request</button>
         <p id="feedback" role="alert"></p>
       </form>
-    </main>
+    </div>
   </body>
 </html>
