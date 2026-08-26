@@ -6,7 +6,7 @@ export type TicketPage = { items: SupportTicket[]; page: number; pageSize: numbe
 export type TicketFilters = { status?: TicketStatus; priority?: TicketPriority; assignedAgent?: string; customerId?: number };
 
 function mapTicket(row: Row): SupportTicket {
-  return { id: Number(row.id), ticketNumber: String(row.ticket_number), customerId: Number(row.customer_id), subject: String(row.subject), description: String(row.description), category: String(row.category), priority: String(row.priority) as TicketPriority, assignedAgent: String(row.assigned_agent), status: String(row.status) as TicketStatus, dueDate: row.due_date === null ? null : String(row.due_date), isEscalated: Boolean(Number(row.is_escalated)), createdAt: String(row.created_at), updatedAt: String(row.updated_at), customerName: String(row.customer_name), customerEmail: String(row.customer_email) };
+  return { id: Number(row.id), ticketNumber: String(row.ticket_number), customerId: Number(row.customer_id), subject: String(row.subject), description: String(row.description), category: String(row.category), priority: String(row.priority) as TicketPriority, assignedAgent: String(row.assigned_agent), status: String(row.status) as TicketStatus, dueDate: row.due_date === null ? null : String(row.due_date), isEscalated: Boolean(Number(row.is_escalated)), createdAt: String(row.created_at), updatedAt: String(row.updated_at), customerName: String(row.customer_name), customerEmail: String(row.customer_email), slaRuleId: row.sla_rule_id === null ? null : Number(row.sla_rule_id), responseTargetMinutes: row.response_target_minutes === null ? null : Number(row.response_target_minutes), responseDueAt: row.response_due_at === null ? null : String(row.response_due_at), responseRespondedAt: row.response_responded_at === null ? null : String(row.response_responded_at), resolutionTargetMinutes: row.resolution_target_minutes === null ? null : Number(row.resolution_target_minutes), resolutionDueAt: row.resolution_due_at === null ? null : String(row.resolution_due_at) };
 }
 function mapHistory(row: Row): TicketHistoryEntry {
   return { id: Number(row.id), ticketId: Number(row.ticket_id), action: String(row.action) as TicketHistoryAction, oldValue: row.old_value === null ? null : String(row.old_value), newValue: row.new_value === null ? null : String(row.new_value), changedBy: String(row.changed_by), createdAt: String(row.created_at) };
@@ -50,12 +50,21 @@ export class TicketRepository {
     } catch (error) { this.database.exec("ROLLBACK"); throw error; }
   }
   escalateTicket(id: number, changedBy: string): SupportTicket | null {
-    const ticket = this.getTicket(id); if (!ticket) return null; if (ticket.isEscalated) return ticket; const now = new Date().toISOString(); this.database.exec("BEGIN");
-    try { this.database.prepare("UPDATE support_tickets SET is_escalated = 1, updated_at = ? WHERE id = ?").run(now, id); this.history(id, "escalated", "false", "true", changedBy, now); this.database.exec("COMMIT"); return this.getTicket(id); } catch (error) { this.database.exec("ROLLBACK"); throw error; }
+    const ticket = this.getTicket(id); if (!ticket) return null; if (ticket.isEscalated) return ticket; const now = new Date().toISOString(); this.database.exec("SAVEPOINT escalate_ticket");
+    try { this.database.prepare("UPDATE support_tickets SET is_escalated = 1, updated_at = ? WHERE id = ?").run(now, id); this.history(id, "escalated", "false", "true", changedBy, now); this.database.exec("RELEASE SAVEPOINT escalate_ticket"); return this.getTicket(id); } catch (error) { this.database.exec("ROLLBACK TO SAVEPOINT escalate_ticket"); this.database.exec("RELEASE SAVEPOINT escalate_ticket"); throw error; }
   }
   addCommunicationHistory(ticketId: number, communicationId: number, changedBy: string) {
     this.history(ticketId, "communication_received", null, String(communicationId), changedBy, new Date().toISOString());
   }
   addInternalCommentHistory(ticketId: number, commentId: number, changedBy: string) { this.history(ticketId, "internal_comment_added", null, String(commentId), changedBy, new Date().toISOString()); }
+  addAutomationHistory(ticketId: number, action: TicketHistoryAction, oldValue: string | null, newValue: string | null, changedBy: string, now = new Date().toISOString()) { this.history(ticketId, action, oldValue, newValue, changedBy, now); }
+  assignAutomatically(ticketId: number, assignedAgent: string, changedBy: string, now = new Date().toISOString()) {
+    const ticket = this.getTicket(ticketId); if (!ticket || ticket.assignedAgent.trim().toLowerCase() === assignedAgent.trim().toLowerCase()) return ticket;
+    this.database.prepare("UPDATE support_tickets SET assigned_agent=?, updated_at=? WHERE id=?").run(assignedAgent, now, ticketId);
+    this.history(ticketId, "automatically_assigned", ticket.assignedAgent, assignedAgent, changedBy, now);
+    return this.getTicket(ticketId);
+  }
+  applySla(ticketId: number, ruleId: number, responseMinutes: number, responseDueAt: string, resolutionMinutes: number, resolutionDueAt: string) { this.database.prepare("UPDATE support_tickets SET sla_rule_id=?, response_target_minutes=?, response_due_at=?, resolution_target_minutes=?, resolution_due_at=? WHERE id=? AND sla_rule_id IS NULL").run(ruleId, responseMinutes, responseDueAt, resolutionMinutes, resolutionDueAt, ticketId); return this.getTicket(ticketId); }
+  markResponded(ticketId: number, changedBy: string) { const ticket=this.getTicket(ticketId); if (!ticket || ticket.responseRespondedAt) return ticket; const now=new Date().toISOString(); this.database.prepare("UPDATE support_tickets SET response_responded_at=?, updated_at=? WHERE id=?").run(now,now,ticketId); this.history(ticketId,"responded",null,now,changedBy,now); return this.getTicket(ticketId); }
   listHistory(ticketId: number): TicketHistoryEntry[] { return (this.database.prepare("SELECT * FROM ticket_history WHERE ticket_id = ? ORDER BY created_at DESC, id DESC").all(ticketId) as Row[]).map(mapHistory); }
 }

@@ -6,7 +6,8 @@ export const protectedPages: Record<string, string> = {
   "/contacts": "Contacts",
   "/opportunities": "Opportunities",
   "/tasks": "Tasks",
-  "/activities": "Activities"
+  "/activities": "Activities",
+  "/automation": "Automation"
 };
 type UserRole = "admin" | "agent";
 let currentRole: UserRole = "agent";
@@ -63,6 +64,7 @@ export async function route() {
   if (path === "/customers") { const { renderCustomers } = await import("./customers.js"); await renderCustomers(); return; }
   if (path === "/tickets") { const { renderTickets } = await import("./tickets.js"); await renderTickets(); return; }
   if (path === "/communications") { const { renderCommunications } = await import("./communications.js"); await renderCommunications(); return; }
+  if (path === "/automation") { const { renderAutomation } = await import("./automation.js"); await renderAutomation(); return; }
   if (path === "/tasks") { const { renderTasks } = await import("./tasks.js"); await renderTasks(); return; }
   const { renderDashboard } = await import("./dashboard.js"); await renderDashboard();
 }

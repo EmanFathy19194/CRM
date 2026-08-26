@@ -13,3 +13,4 @@ One row per feature folder under `.squad/plans/`. `NN` continues as a global exe
 | manage-support-tickets | [manage-support-tickets/00-overview.md](manage-support-tickets/00-overview.md) | 08 |
 | manage-communication-channels | [manage-communication-channels/00-overview.md](manage-communication-channels/00-overview.md) | 09 |
 | agent-dashboard-and-tasks | [agent-dashboard-and-tasks/00-overview.md](agent-dashboard-and-tasks/00-overview.md) | 10 |
+| automation-and-notifications | [automation-and-notifications/00-overview.md](automation-and-notifications/00-overview.md) | 11 |

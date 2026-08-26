@@ -17,14 +17,16 @@ import { communicationChannelTypes } from "./communication.js";
 import { validateCommunication, validatePublicWebRequest } from "./communication-validation.js";
 import { AgentWorkRepository } from "./agent-work-repository.js";
 import { validateComment, validateReminder, validateTask } from "./agent-work-validation.js";
+import { AutomationRepository } from "./automation-repository.js";
+import { validateAutomationRule, validateSlaRule } from "./automation-validation.js";
 const cookieName = "crm_session";
 const projectRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const uploadDirectory = process.env.CRM_UPLOAD_DIR ?? join(projectRoot, "data", "uploads");
 mkdirSync(uploadDirectory, { recursive: true });
-const protectedPagePaths = ["/dashboard", "/customers", "/tickets", "/communications", "/contacts", "/opportunities", "/tasks", "/activities"];
+const protectedPagePaths = ["/dashboard", "/customers", "/tickets", "/communications", "/contacts", "/opportunities", "/tasks", "/activities", "/automation"];
 const customerDetailsPagePath = /^\/customers\/\d+$/;
 const ticketDetailsPagePath = /^\/tickets\/\d+$/;
-const protectedApiPaths = ["/api/customers", "/api/tickets", "/api/communications", "/api/communication-channels", "/api/dashboard", "/api/tasks", "/api/reminders", "/api/contacts", "/api/opportunities", "/api/activities"];
+const protectedApiPaths = ["/api/customers", "/api/tickets", "/api/communications", "/api/communication-channels", "/api/dashboard", "/api/tasks", "/api/reminders", "/api/contacts", "/api/opportunities", "/api/activities", "/api/sla-rules", "/api/automation-rules", "/api/notifications"];
 const upload = multer({ dest: uploadDirectory, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: (_request, file, callback) => callback(null, /^[a-zA-Z0-9._ -]+$/.test(file.originalname)) });
 function readCookie(request, name) {
     return request.headers.cookie
@@ -41,6 +43,7 @@ function isAdmin(request, auth) {
 export function createApp(auth, customerRepository = new CustomerRepository(createDatabase()), ticketRepository = new TicketRepository(customerRepository.getDatabase())) {
     const communicationRepository = new CommunicationRepository(customerRepository.getDatabase());
     const agentWorkRepository = new AgentWorkRepository(customerRepository.getDatabase());
+    const automationRepository = new AutomationRepository(customerRepository.getDatabase(), ticketRepository);
     const app = express();
     app.use(express.json({ limit: "10kb" }));
     app.use(protectedApiPaths, (request, response, next) => {
@@ -191,12 +194,54 @@ export function createApp(auth, customerRepository = new CustomerRepository(crea
         }
         return ticket;
     }
+    function evaluateTicket(ticket, actorName = "system") { return automationRepository.evaluate(ticket, actorName); }
+    function evaluateVisibleTickets(request) { const user = getAuthenticatedUser(request, auth); for (const item of ticketRepository.listTickets(1, 50, { assignedAgent: user.role === "agent" ? user.email : undefined }).items)
+        if (canAccessTicket(request, item))
+            evaluateTicket(item); }
+    app.get("/api/sla-rules", (request, response) => { if (!isAdmin(request, auth))
+        return response.status(403).json({ error: "Administrator access required." }); return response.json(automationRepository.listSlaRules()); });
+    app.post("/api/sla-rules", (request, response) => { if (!isAdmin(request, auth))
+        return response.status(403).json({ error: "Administrator access required." }); const { value, errors } = validateSlaRule(request.body ?? {}); if (Object.keys(errors).length)
+        return response.status(400).json({ errors }); try {
+        return response.status(201).json(automationRepository.createSlaRule(value));
+    }
+    catch {
+        return response.status(500).json({ error: "Unable to save SLA rule." });
+    } });
+    app.patch("/api/sla-rules/:id", (request, response) => { if (!isAdmin(request, auth))
+        return response.status(403).json({ error: "Administrator access required." }); const id = parsePositiveInteger(request.params.id), { value, errors } = validateSlaRule(request.body ?? {}); if (!id)
+        return response.status(400).json({ error: "Invalid SLA rule id." }); if (Object.keys(errors).length)
+        return response.status(400).json({ errors }); const updated = automationRepository.updateSlaRule(id, value); return updated ? response.json(updated) : response.status(404).json({ error: "SLA rule not found." }); });
+    app.delete("/api/sla-rules/:id", (request, response) => { if (!isAdmin(request, auth))
+        return response.status(403).json({ error: "Administrator access required." }); const id = parsePositiveInteger(request.params.id); if (!id)
+        return response.status(400).json({ error: "Invalid SLA rule id." }); return automationRepository.deleteSlaRule(id) ? response.status(204).send() : response.status(404).json({ error: "SLA rule not found." }); });
+    app.get("/api/automation-rules", (request, response) => { if (!isAdmin(request, auth))
+        return response.status(403).json({ error: "Administrator access required." }); return response.json(automationRepository.listAutomationRules()); });
+    app.post("/api/automation-rules", (request, response) => { if (!isAdmin(request, auth))
+        return response.status(403).json({ error: "Administrator access required." }); const { value, errors } = validateAutomationRule(request.body ?? {}); if (Object.keys(errors).length)
+        return response.status(400).json({ errors }); try {
+        return response.status(201).json(automationRepository.createAutomationRule(value));
+    }
+    catch {
+        return response.status(500).json({ error: "Unable to save automation rule." });
+    } });
+    app.patch("/api/automation-rules/:id", (request, response) => { if (!isAdmin(request, auth))
+        return response.status(403).json({ error: "Administrator access required." }); const id = parsePositiveInteger(request.params.id), { value, errors } = validateAutomationRule(request.body ?? {}); if (!id)
+        return response.status(400).json({ error: "Invalid automation rule id." }); if (Object.keys(errors).length)
+        return response.status(400).json({ errors }); const updated = automationRepository.updateAutomationRule(id, value); return updated ? response.json(updated) : response.status(404).json({ error: "Automation rule not found." }); });
+    app.delete("/api/automation-rules/:id", (request, response) => { if (!isAdmin(request, auth))
+        return response.status(403).json({ error: "Administrator access required." }); const id = parsePositiveInteger(request.params.id); if (!id)
+        return response.status(400).json({ error: "Invalid automation rule id." }); return automationRepository.deleteAutomationRule(id) ? response.status(204).send() : response.status(404).json({ error: "Automation rule not found." }); });
+    app.get("/api/notifications", (request, response) => response.json(automationRepository.listNotifications(actor(request))));
+    app.post("/api/notifications/:id/dismiss", (request, response) => { const id = parsePositiveInteger(request.params.id); if (!id)
+        return response.status(400).json({ error: "Invalid notification id." }); return automationRepository.dismissNotification(actor(request), id) ? response.status(200).json({ dismissed: true }) : response.status(404).json({ error: "Notification not found." }); });
     app.get("/api/tickets", (request, response) => {
         const page = parsePositiveInteger(request.query.page ?? 1), pageSize = parsePositiveInteger(request.query.pageSize ?? 10);
         const status = String(request.query.status ?? ""), priority = String(request.query.priority ?? ""), assignedAgent = String(request.query.assignedAgent ?? ""), customerId = request.query.customerId === undefined || request.query.customerId === "" ? undefined : parsePositiveInteger(request.query.customerId);
         if (!page || !pageSize || (status && !ticketStatuses.includes(status)) || (priority && !ticketPriorities.includes(priority)) || (request.query.customerId !== undefined && request.query.customerId !== "" && !customerId))
             return response.status(400).json({ error: "Invalid ticket filters." });
         const user = getAuthenticatedUser(request, auth);
+        evaluateVisibleTickets(request);
         const result = ticketRepository.listTickets(page, pageSize, { status: status || undefined, priority: priority || undefined, assignedAgent: user.role === "agent" ? user.email : assignedAgent || undefined, customerId });
         return response.json(user.role === "agent" ? { ...result, items: result.items.filter((ticket) => canAccessTicket(request, ticket)) } : result);
     });
@@ -209,14 +254,17 @@ export function createApp(auth, customerRepository = new CustomerRepository(crea
         if (!customerRepository.getCustomer(value.customerId))
             return response.status(404).json({ error: "Customer not found." });
         try {
-            return response.status(201).json(ticketRepository.createTicket(value, actor(request)));
+            let ticket = ticketRepository.createTicket(value, actor(request));
+            ticket = automationRepository.applySlaOnCreate(ticket);
+            ticket = automationRepository.applyAutomation(ticket, actor(request));
+            return response.status(201).json(evaluateTicket(ticket, actor(request)));
         }
         catch {
             return response.status(500).json({ error: "Unable to save ticket." });
         }
     });
     app.get("/api/tickets/:id", (request, response) => { const id = ticketId(request, response); if (!id)
-        return; const ticket = requireTicketAccess(request, response, id); return ticket && response.json(ticket); });
+        return; const ticket = requireTicketAccess(request, response, id); return ticket && response.json(evaluateTicket(ticket)); });
     app.patch("/api/tickets/:id", (request, response) => {
         const id = ticketId(request, response);
         if (!id)
@@ -231,8 +279,10 @@ export function createApp(auth, customerRepository = new CustomerRepository(crea
         if (!customerRepository.getCustomer(value.customerId))
             return response.status(404).json({ error: "Customer not found." });
         try {
-            const ticket = ticketRepository.updateTicket(id, value, actor(request));
-            return ticket ? response.json(ticket) : response.status(404).json({ error: "Ticket not found." });
+            let ticket = ticketRepository.updateTicket(id, value, actor(request));
+            if (ticket)
+                ticket = automationRepository.applyAutomation(ticket, actor(request));
+            return ticket ? response.json(evaluateTicket(ticket, actor(request))) : response.status(404).json({ error: "Ticket not found." });
         }
         catch {
             return response.status(500).json({ error: "Unable to update ticket." });
@@ -246,6 +296,8 @@ export function createApp(auth, customerRepository = new CustomerRepository(crea
     catch {
         return response.status(500).json({ error: "Unable to escalate ticket." });
     } });
+    app.post("/api/tickets/:id/responded", (request, response) => { const id = ticketId(request, response); if (!id || !requireTicketAccess(request, response, id))
+        return; const ticket = ticketRepository.markResponded(id, actor(request)); return ticket ? response.json(ticket) : response.status(404).json({ error: "Ticket not found." }); });
     app.get("/api/tickets/:id/history", (request, response) => { const id = ticketId(request, response); if (!id || !requireTicketAccess(request, response, id))
         return; return response.json(ticketRepository.listHistory(id)); });
     app.get("/api/tickets/:id/comments", (request, response) => { const id = ticketId(request, response); if (!id || !requireTicketAccess(request, response, id))
@@ -276,9 +328,10 @@ export function createApp(auth, customerRepository = new CustomerRepository(crea
         }
     });
     app.get("/api/dashboard", (request, response) => {
+        evaluateVisibleTickets(request);
         const owner = actor(request), assignedTickets = ticketRepository.listTickets(1, 50, { assignedAgent: owner }).items.filter((ticket) => ticket.assignedAgent.trim().toLowerCase() === owner);
         const allTickets = isAdmin(request, auth) ? ticketRepository.listTickets(1, 50).items : assignedTickets;
-        return response.json({ assignedTickets, counts: { assigned: assignedTickets.length, open: allTickets.filter((ticket) => ticket.status === "open").length, pending: allTickets.filter((ticket) => ticket.status === "pending").length, urgent: allTickets.filter((ticket) => ticket.priority === "urgent").length }, tasks: agentWorkRepository.listTasks(owner), reminders: agentWorkRepository.listReminders(owner), recentActivity: agentWorkRepository.listActivity(owner) });
+        return response.json({ assignedTickets, counts: { assigned: assignedTickets.length, open: allTickets.filter((ticket) => ticket.status === "open").length, pending: allTickets.filter((ticket) => ticket.status === "pending").length, urgent: allTickets.filter((ticket) => ticket.priority === "urgent").length }, tasks: agentWorkRepository.listTasks(owner), reminders: agentWorkRepository.listReminders(owner), notifications: automationRepository.listNotifications(owner), recentActivity: agentWorkRepository.listActivity(owner) });
     });
     app.get("/api/tasks", (request, response) => response.json(agentWorkRepository.listTasks(actor(request))));
     app.post("/api/tasks", (request, response) => { const { value, errors } = validateTask(request.body ?? {}); if (Object.keys(errors).length)

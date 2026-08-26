@@ -2,10 +2,11 @@ import { escapeHtml, renderProtectedShell } from "./shared.js";
 export async function renderCommunications() {
     renderProtectedShell(`<div id="page-content"><div class="customer-loading"><span class="loading-orb"></span><p>Loading communications...</p></div></div>`, "/communications");
     const content = document.querySelector("#page-content");
-    const [channelsResponse, customersResponse, communicationsResponse] = await Promise.all([
+    const [channelsResponse, customersResponse, communicationsResponse, ticketsResponse] = await Promise.all([
         fetch("/api/communication-channels", { credentials: "same-origin" }),
         fetch("/api/customers?pageSize=50", { credentials: "same-origin" }),
-        fetch("/api/communications", { credentials: "same-origin" })
+        fetch("/api/communications", { credentials: "same-origin" }),
+        fetch("/api/tickets?pageSize=50", { credentials: "same-origin" })
     ]);
     if (!channelsResponse.ok) {
         content.innerHTML = `<div class="customer-error"><strong>We could not load communication channels.</strong></div>`;
@@ -13,6 +14,7 @@ export async function renderCommunications() {
     }
     const channels = await channelsResponse.json();
     const customers = customersResponse.ok ? (await customersResponse.json()).items : [];
+    const tickets = ticketsResponse.ok ? (await ticketsResponse.json()).items : [];
     let communications = communicationsResponse.ok ? await communicationsResponse.json() : [];
     const customerName = (id) => { const customer = customers.find((item) => item.id === id); return customer ? `${customer.firstName} ${customer.lastName}` : `Customer #${id}`; };
     content.innerHTML = `
@@ -24,7 +26,7 @@ export async function renderCommunications() {
       <div class="customer-fields">
         <label>Customer *<select name="customerId" required><option value="">Choose customer</option>${customers.map((customer) => `<option value="${customer.id}">${escapeHtml(customer.firstName)} ${escapeHtml(customer.lastName)} — ${escapeHtml(customer.email)}</option>`).join("")}</select></label>
         <label>Channel *<select name="channel" required><option value="">Choose channel</option>${channels.filter((channel) => channel.isEnabled && channel.type !== "web_form").map((channel) => `<option value="${escapeHtml(channel.type)}">${escapeHtml(channel.displayName)}</option>`).join("")}</select></label>
-        <label>Ticket id <input name="ticketId" type="number" min="1" placeholder="Optional existing ticket id" /></label>
+        <label>Ticket <select name="ticketId"><option value="">Create a new ticket</option>${tickets.map((ticket) => `<option value="${ticket.id}">${escapeHtml(ticket.ticketNumber)} — ${escapeHtml(ticket.subject)}</option>`).join("")}</select></label>
         <label>Source reference <input name="sourceReference" maxlength="200" placeholder="Optional reference" /></label>
         <label class="wide-field">Incoming message *<textarea name="message" maxlength="2000" required></textarea></label>
       </div>
