@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { validateLogin } from "./validation.js";
-export const userRoles = ["admin", "agent"];
+export const userRoles = ["admin", "agent", "customer"];
 export class AuthService {
     sessionPath;
     users = new Map();
@@ -16,7 +16,7 @@ export class AuthService {
             const stored = JSON.parse(readFileSync(sessionPath, "utf8"));
             for (const [token, session] of Object.entries(stored)) {
                 if (session.expiresAt > Date.now())
-                    this.sessions.set(token, { ...session, user: { ...session.user, role: session.user.role === "admin" ? "admin" : "agent" } });
+                    this.sessions.set(token, { ...session, user: { ...session.user, role: session.user.role === "admin" ? "admin" : session.user.role === "customer" ? "customer" : "agent" } });
             }
             this.persistSessions();
         }
@@ -38,11 +38,24 @@ export class AuthService {
             passwordHash: await bcrypt.hash(password, 12)
         });
     }
+    async customerLogin(email, _password) {
+        const normalizedEmail = email.trim().toLowerCase();
+        const user = this.users.get(normalizedEmail);
+        if (!user || user.role !== "customer")
+            return null;
+        const token = randomUUID();
+        this.sessions.set(token, { user: { id: user.id, email: user.email, role: user.role }, expiresAt: Date.now() + 60 * 60 * 1000 });
+        this.persistSessions();
+        return { token, user: { id: user.id, email: user.email, role: user.role } };
+    }
     async login(credentials) {
         if (validateLogin(credentials))
             return null;
-        const user = this.users.get(credentials.email.trim().toLowerCase());
-        if (!user || !(await bcrypt.compare(credentials.password, user.passwordHash)))
+        const normalizedEmail = credentials.email.trim().toLowerCase();
+        const user = this.users.get(normalizedEmail);
+        if (!user || user.role === "customer")
+            return null;
+        if (!(await bcrypt.compare(credentials.password, user.passwordHash)))
             return null;
         const token = randomUUID();
         this.sessions.set(token, { user: { id: user.id, email: user.email, role: user.role }, expiresAt: Date.now() + 60 * 60 * 1000 });

@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 function mapCustomer(row) {
     return {
         id: Number(row.id),
@@ -15,9 +16,10 @@ export class CustomerRepository {
     getDatabase() { return this.database; }
     createCustomer(input) {
         const now = new Date().toISOString();
+        const passwordHash = input.password ? bcrypt.hashSync(input.password, 12) : null;
         const result = this.database.prepare(`INSERT INTO customers
-      (first_name, last_name, email, phone, company, job_title, status, address, notes, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(input.firstName, input.lastName, input.email, input.phone, input.company, input.jobTitle, input.status, input.address, input.notes, now, now);
+      (first_name, last_name, email, phone, company, job_title, status, address, notes, password_hash, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(input.firstName, input.lastName, input.email, input.phone, input.company, input.jobTitle, input.status, input.address, input.notes, passwordHash, now, now);
         return this.getCustomer(Number(result.lastInsertRowid));
     }
     listCustomers(page = 1, pageSize = 10, search = "", status = "") {
@@ -44,8 +46,13 @@ export class CustomerRepository {
     }
     updateCustomer(id, input) {
         const now = new Date().toISOString();
-        const result = this.database.prepare(`UPDATE customers SET first_name = ?, last_name = ?, email = ?, phone = ?, company = ?, job_title = ?, status = ?, address = ?, notes = ?, updated_at = ? WHERE id = ?`).run(input.firstName, input.lastName, input.email, input.phone, input.company, input.jobTitle, input.status, input.address, input.notes, now, id);
+        const passwordHash = input.password ? bcrypt.hashSync(input.password, 12) : undefined;
+        const result = this.database.prepare(`UPDATE customers SET first_name = ?, last_name = ?, email = ?, phone = ?, company = ?, job_title = ?, status = ?, address = ?, notes = ?, updated_at = ? ${passwordHash !== undefined ? ", password_hash = ?" : ""} WHERE id = ?`).run(input.firstName, input.lastName, input.email, input.phone, input.company, input.jobTitle, input.status, input.address, input.notes, now, ...(passwordHash !== undefined ? [passwordHash] : []), id);
         return Number(result.changes) ? this.getCustomer(id) : null;
+    }
+    verifyCustomerPassword(email, password) {
+        const rows = this.database.prepare("SELECT password_hash FROM customers WHERE lower(email) = lower(?) ORDER BY id").all(email);
+        return rows.some((row) => row.password_hash !== null && bcrypt.compareSync(password, String(row.password_hash)));
     }
     deleteCustomer(id) {
         return Boolean(Number(this.database.prepare("DELETE FROM customers WHERE id = ?").run(id).changes));

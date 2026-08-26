@@ -7,9 +7,10 @@ export const protectedPages: Record<string, string> = {
   "/opportunities": "Opportunities",
   "/tasks": "Tasks",
   "/activities": "Activities",
-  "/automation": "Automation"
+  "/automation": "Automation",
+  "/admin/knowledge-base": "Knowledge Base"
 };
-type UserRole = "admin" | "agent";
+type UserRole = "admin" | "agent" | "customer";
 let currentRole: UserRole = "agent";
 
 export function escapeHtml(value: string) {
@@ -30,7 +31,7 @@ export function showDialog(options: { title: string; message: string; input?: st
 }
 
 export function renderSidebar(currentPath: string) {
-  const visiblePages = currentRole === "admin" ? protectedPages : Object.fromEntries(Object.entries(protectedPages).filter(([path]) => ["/dashboard", "/tickets", "/tasks", "/activities"].includes(path)));
+  const visiblePages = currentRole === "admin" ? protectedPages : currentRole === "customer" ? Object.fromEntries(Object.entries(protectedPages).filter(([path]) => ["/dashboard", "/tickets"].includes(path))) : Object.fromEntries(Object.entries(protectedPages).filter(([path]) => ["/dashboard", "/tickets", "/tasks", "/activities"].includes(path)));
   const links = Object.entries(visiblePages).map(([path, label]) => `<a class="nav-link${path === currentPath ? " active" : ""}" href="${path}"><span class="nav-dot" aria-hidden="true"></span>${label}</a>`).join("");
   return `<aside class="sidebar"><div class="sidebar-brand"><span class="brand-mark" aria-hidden="true"></span><span>Northstar CRM</span></div><div class="sidebar-label">Workspace</div><nav class="crm-nav" aria-label="CRM sections">${links}</nav><div class="sidebar-footer"><span class="signal"><i aria-hidden="true"></i><span>Workspace online</span></span><button class="logout-button" id="logout"><span>Log out</span><span aria-hidden="true">&#8594;</span></button></div></aside>`;
 }
@@ -59,6 +60,7 @@ export async function route() {
   const authResponse = await fetch("/api/me", { credentials: "same-origin" });
   if (!authResponse.ok) { history.replaceState({}, "", "/"); const { renderLogin } = await import("./login.js"); renderLogin("Please sign in to continue."); return; }
   currentRole = ((await authResponse.json()) as { user: { role: UserRole } }).user.role;
+  if (currentRole === "customer" && !["/dashboard", "/tickets"].includes(path)) { history.replaceState({}, "", "/dashboard"); return void route(); }
   if (/^\/customers\/\d+$/.test(path)) { const { renderCustomerDetails } = await import("./customer-details.js"); await renderCustomerDetails(Number(path.split("/")[2])); return; }
   if (/^\/tickets\/\d+$/.test(path)) { const { renderTicketDetails } = await import("./ticket-details.js"); await renderTicketDetails(Number(path.split("/")[2])); return; }
   if (path === "/customers") { const { renderCustomers } = await import("./customers.js"); await renderCustomers(); return; }
@@ -66,5 +68,6 @@ export async function route() {
   if (path === "/communications") { const { renderCommunications } = await import("./communications.js"); await renderCommunications(); return; }
   if (path === "/automation") { const { renderAutomation } = await import("./automation.js"); await renderAutomation(); return; }
   if (path === "/tasks") { const { renderTasks } = await import("./tasks.js"); await renderTasks(); return; }
+  if (path === "/admin/knowledge-base") { const { renderKnowledgeBase } = await import("./knowledge-base.js"); await renderKnowledgeBase(); return; }
   const { renderDashboard } = await import("./dashboard.js"); await renderDashboard();
 }

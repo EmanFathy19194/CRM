@@ -10,20 +10,21 @@ export function createDatabase(location = process.env.CRM_DATABASE_PATH ?? join(
   database.exec(`PRAGMA busy_timeout = 5000;
   PRAGMA journal_mode = WAL;
   PRAGMA foreign_keys = ON;
-  CREATE TABLE IF NOT EXISTS customers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    first_name TEXT NOT NULL,
-    last_name TEXT NOT NULL,
-    email TEXT NOT NULL,
-    phone TEXT NOT NULL DEFAULT '',
-    company TEXT NOT NULL DEFAULT '',
-    job_title TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL,
-    address TEXT NOT NULL DEFAULT '',
-    notes TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
+   CREATE TABLE IF NOT EXISTS customers (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     first_name TEXT NOT NULL,
+     last_name TEXT NOT NULL,
+     email TEXT NOT NULL,
+     phone TEXT NOT NULL DEFAULT '',
+     company TEXT NOT NULL DEFAULT '',
+     job_title TEXT NOT NULL DEFAULT '',
+     status TEXT NOT NULL,
+     address TEXT NOT NULL DEFAULT '',
+     notes TEXT NOT NULL DEFAULT '',
+     password_hash TEXT,
+     created_at TEXT NOT NULL,
+     updated_at TEXT NOT NULL
+   );
   CREATE INDEX IF NOT EXISTS customers_created_at_idx ON customers (created_at DESC);
   CREATE TABLE IF NOT EXISTS customer_notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,7 +51,8 @@ export function createDatabase(location = process.env.CRM_DATABASE_PATH ?? join(
     content TEXT NOT NULL,
     created_at TEXT NOT NULL
   );
-  CREATE INDEX IF NOT EXISTS customer_interactions_customer_idx ON customer_interactions (customer_id, created_at DESC, id DESC);`);
+   CREATE INDEX IF NOT EXISTS customer_interactions_customer_idx ON customer_interactions (customer_id, created_at DESC, id DESC);`);
+  try { database.exec(`ALTER TABLE customers ADD COLUMN password_hash TEXT;`); } catch { /* Existing databases already have the column. */ }
   database.exec(`CREATE TABLE IF NOT EXISTS support_tickets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticket_number TEXT NOT NULL UNIQUE,
@@ -115,5 +117,9 @@ export function createDatabase(location = process.env.CRM_DATABASE_PATH ?? join(
   CREATE INDEX IF NOT EXISTS ticket_internal_comments_ticket_idx ON ticket_internal_comments (ticket_id, created_at DESC, id DESC);
   CREATE TABLE IF NOT EXISTS agent_activity (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_email TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL, ticket_id INTEGER REFERENCES support_tickets(id) ON DELETE SET NULL, created_at TEXT NOT NULL);
   CREATE INDEX IF NOT EXISTS agent_activity_owner_idx ON agent_activity (owner_email, created_at DESC, id DESC);`);
+  database.exec(`CREATE TABLE IF NOT EXISTS knowledge_articles (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL CHECK(type IN ('faq','help','solution','guide')), category TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('draft','published')), published_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS knowledge_articles_public_idx ON knowledge_articles(status,type,category,updated_at DESC,id DESC);
+  CREATE TABLE IF NOT EXISTS portal_sessions (token_hash TEXT PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS ticket_feedback (id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE, customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE, rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5), message TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(ticket_id,customer_id));`);
   return database;
 }

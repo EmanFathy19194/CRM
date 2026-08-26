@@ -1,5 +1,6 @@
 import { Customer, CreateCustomerInput, CustomerAttachment, CustomerInteraction, CustomerNote, InteractionType } from "./customer.js";
 import type { DatabaseSync } from "node:sqlite";
+import bcrypt from "bcryptjs";
 
 type CustomerRow = Record<string, string | number | bigint>;
 export type CustomerPage = { items: Customer[]; page: number; pageSize: number; total: number; totalPages: number };
@@ -21,11 +22,12 @@ export class CustomerRepository {
 
   createCustomer(input: CreateCustomerInput): Customer {
     const now = new Date().toISOString();
+    const passwordHash = input.password ? bcrypt.hashSync(input.password, 12) : null;
     const result = this.database.prepare(`INSERT INTO customers
-      (first_name, last_name, email, phone, company, job_title, status, address, notes, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      (first_name, last_name, email, phone, company, job_title, status, address, notes, password_hash, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       input.firstName, input.lastName, input.email, input.phone, input.company, input.jobTitle,
-      input.status, input.address, input.notes, now, now
+      input.status, input.address, input.notes, passwordHash, now, now
     );
     return this.getCustomer(Number(result.lastInsertRowid))!;
   }
@@ -57,11 +59,17 @@ export class CustomerRepository {
 
   updateCustomer(id: number, input: CreateCustomerInput): Customer | null {
     const now = new Date().toISOString();
-    const result = this.database.prepare(`UPDATE customers SET first_name = ?, last_name = ?, email = ?, phone = ?, company = ?, job_title = ?, status = ?, address = ?, notes = ?, updated_at = ? WHERE id = ?`).run(
+    const passwordHash = input.password ? bcrypt.hashSync(input.password, 12) : undefined;
+    const result = this.database.prepare(`UPDATE customers SET first_name = ?, last_name = ?, email = ?, phone = ?, company = ?, job_title = ?, status = ?, address = ?, notes = ?, updated_at = ? ${passwordHash !== undefined ? ", password_hash = ?" : ""} WHERE id = ?`).run(
       input.firstName, input.lastName, input.email, input.phone, input.company, input.jobTitle,
-      input.status, input.address, input.notes, now, id
+      input.status, input.address, input.notes, now, ...(passwordHash !== undefined ? [passwordHash] : []), id
     );
     return Number(result.changes) ? this.getCustomer(id) : null;
+  }
+
+  verifyCustomerPassword(email: string, password: string): boolean {
+    const rows = this.database.prepare("SELECT password_hash FROM customers WHERE lower(email) = lower(?) ORDER BY id").all(email) as CustomerRow[];
+    return rows.some((row) => row.password_hash !== null && bcrypt.compareSync(password, String(row.password_hash)));
   }
 
   deleteCustomer(id: number): boolean {

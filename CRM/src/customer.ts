@@ -11,6 +11,7 @@ export type CreateCustomerInput = {
   status: CustomerStatus;
   address: string;
   notes: string;
+  password?: string;
 };
 
 export type Customer = CreateCustomerInput & {

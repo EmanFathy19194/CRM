@@ -1,0 +1,9 @@
+export const articleTypes = ["faq", "help", "solution", "guide"] as const;
+export type ArticleType = typeof articleTypes[number];
+export const articleStatuses = ["draft", "published"] as const;
+export type ArticleStatus = typeof articleStatuses[number];
+export type CreateKnowledgeArticleInput = { type: ArticleType; category: string; title: string; summary: string; body: string; status: ArticleStatus };
+export type KnowledgeArticle = CreateKnowledgeArticleInput & { id: number; publishedAt: string | null; createdAt: string; updatedAt: string };
+export type PortalTicket = { ticketNumber: string; subject: string; category: string; status: string; dueDate: string | null; isEscalated: boolean; createdAt: string; updatedAt: string };
+export type PortalActivity = { action: string; label: string; createdAt: string };
+export type CreateTicketFeedbackInput = { rating: number; message: string };

@@ -14,7 +14,7 @@ form.addEventListener("submit", async (event) => {
     const response = await fetch("/api/public/web-requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form).entries())) });
     const body = await response.json().catch(() => ({}));
     if (response.ok && typeof body.ticketNumber === "string") {
-      feedback.textContent = `Your support reference is "${body.ticketNumber}".`;
+      feedback.innerHTML = `Your support reference is "${escapeHtml(body.ticketNumber)}". <a href="${escapeHtml(body.portalUrl ?? `/portal?ticket=${body.ticketNumber}`)}">Access your requests</a>`;
       feedback.classList.add("success");
       form.reset();
     } else {
