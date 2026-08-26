@@ -3,11 +3,13 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { validateLogin } from "./validation.js";
-export const userRoles = ["admin", "agent", "customer"];
+export const userRoles = ["admin", "manager", "agent", "customer"];
 export class AuthService {
     sessionPath;
     users = new Map();
     sessions = new Map();
+    staffStore;
+    setStaffStore(store) { this.staffStore = store; }
     constructor(sessionPath) {
         this.sessionPath = sessionPath;
         if (!sessionPath || !existsSync(sessionPath))
@@ -30,6 +32,10 @@ export class AuthService {
         writeFileSync(this.sessionPath, JSON.stringify(active), "utf8");
     }
     async seedUser(email, password, role = "admin") {
+        if (this.staffStore) {
+            await this.staffStore.seed(email, password, role);
+            return;
+        }
         const normalizedEmail = email.trim().toLowerCase();
         this.users.set(normalizedEmail, {
             id: randomUUID(),
@@ -40,7 +46,8 @@ export class AuthService {
     }
     async customerLogin(email, _password) {
         const normalizedEmail = email.trim().toLowerCase();
-        const user = this.users.get(normalizedEmail);
+        const stored = this.staffStore?.getForLogin(normalizedEmail);
+        const user = stored ? { id: String(stored.id), email: stored.email, role: stored.role, passwordHash: stored.passwordHash } : this.users.get(normalizedEmail);
         if (!user || user.role !== "customer")
             return null;
         const token = randomUUID();
@@ -52,7 +59,8 @@ export class AuthService {
         if (validateLogin(credentials))
             return null;
         const normalizedEmail = credentials.email.trim().toLowerCase();
-        const user = this.users.get(normalizedEmail);
+        const stored = this.staffStore?.getForLogin(normalizedEmail);
+        const user = stored ? { id: String(stored.id), email: stored.email, role: stored.role, passwordHash: stored.passwordHash } : this.users.get(normalizedEmail);
         if (!user || user.role === "customer")
             return null;
         if (!(await bcrypt.compare(credentials.password, user.passwordHash)))
@@ -66,7 +74,7 @@ export class AuthService {
         if (!token)
             return null;
         const session = this.sessions.get(token);
-        if (!session || session.expiresAt <= Date.now()) {
+        if (!session || session.expiresAt <= Date.now() || (session.user.role !== "customer" && this.staffStore !== undefined && !this.staffStore.isActive(session.user.email))) {
             this.sessions.delete(token);
             this.persistSessions();
             return null;

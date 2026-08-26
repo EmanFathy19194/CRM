@@ -37,11 +37,11 @@ describe("knowledge base integration", () => {
         expect((await agent.get("/api/articles")).status).toBe(200);
     });
     it("returns 404 for draft or absent public articles", async () => {
-        const { agent } = await adminRepo();
+        const { agent, app } = await adminRepo();
         await agent.post("/api/login").send({ email: "demo@example.com", password: "Password123!" });
         const created = await agent.post("/api/articles").send({ type: "faq", category: "A", title: "T", summary: "S", body: "B", status: "draft" });
-        expect((await request(createApp(auth)).get(`/api/public/articles/${created.body.id}`)).status).toBe(404);
-        expect((await request(createApp(auth)).get("/api/public/articles/999")).status).toBe(404);
+        expect((await request(app).get(`/api/public/articles/${created.body.id}`)).status).toBe(404);
+        expect((await request(app).get("/api/public/articles/999")).status).toBe(404);
     });
     it("searches published articles publicly", async () => {
         const repository = new CustomerRepository(createDatabase(":memory:"));
