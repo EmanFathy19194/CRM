@@ -8,6 +8,8 @@ export const protectedPages: Record<string, string> = {
   "/tasks": "Tasks",
   "/activities": "Activities"
 };
+type UserRole = "admin" | "agent";
+let currentRole: UserRole = "agent";
 
 export function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]!));
@@ -27,7 +29,8 @@ export function showDialog(options: { title: string; message: string; input?: st
 }
 
 export function renderSidebar(currentPath: string) {
-  const links = Object.entries(protectedPages).map(([path, label]) => `<a class="nav-link${path === currentPath ? " active" : ""}" href="${path}"><span class="nav-dot" aria-hidden="true"></span>${label}</a>`).join("");
+  const visiblePages = currentRole === "admin" ? protectedPages : Object.fromEntries(Object.entries(protectedPages).filter(([path]) => ["/dashboard", "/tickets", "/tasks", "/activities"].includes(path)));
+  const links = Object.entries(visiblePages).map(([path, label]) => `<a class="nav-link${path === currentPath ? " active" : ""}" href="${path}"><span class="nav-dot" aria-hidden="true"></span>${label}</a>`).join("");
   return `<aside class="sidebar"><div class="sidebar-brand"><span class="brand-mark" aria-hidden="true"></span><span>Northstar CRM</span></div><div class="sidebar-label">Workspace</div><nav class="crm-nav" aria-label="CRM sections">${links}</nav><div class="sidebar-footer"><span class="signal"><i aria-hidden="true"></i><span>Workspace online</span></span><button class="logout-button" id="logout"><span>Log out</span><span aria-hidden="true">&#8594;</span></button></div></aside>`;
 }
 
@@ -54,10 +57,12 @@ export async function route() {
   }
   const authResponse = await fetch("/api/me", { credentials: "same-origin" });
   if (!authResponse.ok) { history.replaceState({}, "", "/"); const { renderLogin } = await import("./login.js"); renderLogin("Please sign in to continue."); return; }
+  currentRole = ((await authResponse.json()) as { user: { role: UserRole } }).user.role;
   if (/^\/customers\/\d+$/.test(path)) { const { renderCustomerDetails } = await import("./customer-details.js"); await renderCustomerDetails(Number(path.split("/")[2])); return; }
   if (/^\/tickets\/\d+$/.test(path)) { const { renderTicketDetails } = await import("./ticket-details.js"); await renderTicketDetails(Number(path.split("/")[2])); return; }
   if (path === "/customers") { const { renderCustomers } = await import("./customers.js"); await renderCustomers(); return; }
   if (path === "/tickets") { const { renderTickets } = await import("./tickets.js"); await renderTickets(); return; }
   if (path === "/communications") { const { renderCommunications } = await import("./communications.js"); await renderCommunications(); return; }
-  const { renderDashboard } = await import("./dashboard.js"); renderDashboard(protectedPages[path]);
+  if (path === "/tasks") { const { renderTasks } = await import("./tasks.js"); await renderTasks(); return; }
+  const { renderDashboard } = await import("./dashboard.js"); await renderDashboard();
 }

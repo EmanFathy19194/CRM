@@ -98,5 +98,6 @@ export class TicketRepository {
     addCommunicationHistory(ticketId, communicationId, changedBy) {
         this.history(ticketId, "communication_received", null, String(communicationId), changedBy, new Date().toISOString());
     }
+    addInternalCommentHistory(ticketId, commentId, changedBy) { this.history(ticketId, "internal_comment_added", null, String(commentId), changedBy, new Date().toISOString()); }
     listHistory(ticketId) { return this.database.prepare("SELECT * FROM ticket_history WHERE ticket_id = ? ORDER BY created_at DESC, id DESC").all(ticketId).map(mapHistory); }
 }

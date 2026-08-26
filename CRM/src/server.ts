@@ -16,6 +16,8 @@ import { parsePositiveInteger, validateTicket } from "./ticket-validation.js";
 import { CommunicationRepository } from "./communication-repository.js";
 import { communicationChannelTypes } from "./communication.js";
 import { validateCommunication, validatePublicWebRequest } from "./communication-validation.js";
+import { AgentWorkRepository } from "./agent-work-repository.js";
+import { validateComment, validateReminder, validateTask } from "./agent-work-validation.js";
 
 const cookieName = "crm_session";
 const projectRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..");
@@ -24,7 +26,7 @@ mkdirSync(uploadDirectory, { recursive: true });
 const protectedPagePaths = ["/dashboard", "/customers", "/tickets", "/communications", "/contacts", "/opportunities", "/tasks", "/activities"];
 const customerDetailsPagePath = /^\/customers\/\d+$/;
 const ticketDetailsPagePath = /^\/tickets\/\d+$/;
-const protectedApiPaths = ["/api/customers", "/api/tickets", "/api/communications", "/api/communication-channels", "/api/contacts", "/api/opportunities", "/api/tasks", "/api/activities"];
+const protectedApiPaths = ["/api/customers", "/api/tickets", "/api/communications", "/api/communication-channels", "/api/dashboard", "/api/tasks", "/api/reminders", "/api/contacts", "/api/opportunities", "/api/activities"];
 const upload = multer({ dest: uploadDirectory, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: (_request, file, callback) => callback(null, /^[a-zA-Z0-9._ -]+$/.test(file.originalname)) });
 
 function readCookie(request: Request, name: string): string | undefined {
@@ -38,8 +40,13 @@ function getAuthenticatedUser(request: Request, auth: AuthService) {
   return auth.getUser(readCookie(request, cookieName));
 }
 
+function isAdmin(request: Request, auth: AuthService): boolean {
+  return getAuthenticatedUser(request, auth)?.role === "admin";
+}
+
 export function createApp(auth: AuthService, customerRepository = new CustomerRepository(createDatabase()), ticketRepository = new TicketRepository(customerRepository.getDatabase())) {
   const communicationRepository = new CommunicationRepository(customerRepository.getDatabase());
+  const agentWorkRepository = new AgentWorkRepository(customerRepository.getDatabase());
   const app = express();
   app.use(express.json({ limit: "10kb" }));
 
@@ -47,6 +54,11 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
     if (!getAuthenticatedUser(request, auth)) {
       return response.status(401).json({ error: "Authentication required." });
     }
+    return next();
+  });
+
+  app.use(["/api/customers", "/api/communications", "/api/communication-channels", "/api/contacts", "/api/opportunities", "/api/activities"], (request, response, next) => {
+    if (!isAdmin(request, auth)) return response.status(403).json({ error: "Administrator access required." });
     return next();
   });
 
@@ -121,30 +133,65 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
     return id;
   }
   function actor(request: Request): string { return getAuthenticatedUser(request, auth)!.email; }
+  function canAccessTicket(request: Request, ticket: { assignedAgent: string }): boolean {
+    const user = getAuthenticatedUser(request, auth)!;
+    return user.role === "admin" || ticket.assignedAgent.trim().toLowerCase() === user.email;
+  }
+  function requireTicketAccess(request: Request, response: Response, id: number) {
+    const ticket = ticketRepository.getTicket(id);
+    if (!ticket || !canAccessTicket(request, ticket)) { response.status(404).json({ error: "Ticket not found." }); return null; }
+    return ticket;
+  }
 
   app.get("/api/tickets", (request, response) => {
     const page = parsePositiveInteger(request.query.page ?? 1), pageSize = parsePositiveInteger(request.query.pageSize ?? 10);
     const status = String(request.query.status ?? ""), priority = String(request.query.priority ?? ""), assignedAgent = String(request.query.assignedAgent ?? ""), customerId = request.query.customerId === undefined || request.query.customerId === "" ? undefined : parsePositiveInteger(request.query.customerId);
     if (!page || !pageSize || (status && !ticketStatuses.includes(status as typeof ticketStatuses[number])) || (priority && !ticketPriorities.includes(priority as typeof ticketPriorities[number])) || (request.query.customerId !== undefined && request.query.customerId !== "" && !customerId)) return response.status(400).json({ error: "Invalid ticket filters." });
-    return response.json(ticketRepository.listTickets(page, pageSize, { status: status as typeof ticketStatuses[number] || undefined, priority: priority as typeof ticketPriorities[number] || undefined, assignedAgent: assignedAgent || undefined, customerId }));
+    const user = getAuthenticatedUser(request, auth)!;
+    const result = ticketRepository.listTickets(page, pageSize, { status: status as typeof ticketStatuses[number] || undefined, priority: priority as typeof ticketPriorities[number] || undefined, assignedAgent: user.role === "agent" ? user.email : assignedAgent || undefined, customerId });
+    return response.json(user.role === "agent" ? { ...result, items: result.items.filter((ticket) => canAccessTicket(request, ticket)) } : result);
   });
   app.post("/api/tickets", (request, response) => {
+    if (!isAdmin(request, auth)) return response.status(403).json({ error: "Administrator access required." });
     const { value, errors } = validateTicket(request.body ?? {}); if (Object.keys(errors).length) return response.status(400).json({ errors });
     if (!customerRepository.getCustomer(value.customerId)) return response.status(404).json({ error: "Customer not found." });
     try { return response.status(201).json(ticketRepository.createTicket(value, actor(request))); } catch { return response.status(500).json({ error: "Unable to save ticket." }); }
   });
-  app.get("/api/tickets/:id", (request, response) => { const id = ticketId(request, response); if (!id) return; const ticket = ticketRepository.getTicket(id); return ticket ? response.json(ticket) : response.status(404).json({ error: "Ticket not found." }); });
+  app.get("/api/tickets/:id", (request, response) => { const id = ticketId(request, response); if (!id) return; const ticket = requireTicketAccess(request, response, id); return ticket && response.json(ticket); });
   app.patch("/api/tickets/:id", (request, response) => {
     const id = ticketId(request, response); if (!id) return; const { value, errors } = validateTicket(request.body ?? {}); if (Object.keys(errors).length) return response.status(400).json({ errors });
+    if (!requireTicketAccess(request, response, id)) return;
+    if (!isAdmin(request, auth) && value.assignedAgent.trim().toLowerCase() !== actor(request)) return response.status(403).json({ error: "Agents cannot reassign tickets." });
     if (!customerRepository.getCustomer(value.customerId)) return response.status(404).json({ error: "Customer not found." });
     try { const ticket = ticketRepository.updateTicket(id, value, actor(request)); return ticket ? response.json(ticket) : response.status(404).json({ error: "Ticket not found." }); } catch { return response.status(500).json({ error: "Unable to update ticket." }); }
   });
-  app.post("/api/tickets/:id/escalate", (request, response) => { const id = ticketId(request, response); if (!id) return; try { const ticket = ticketRepository.escalateTicket(id, actor(request)); return ticket ? response.json(ticket) : response.status(404).json({ error: "Ticket not found." }); } catch { return response.status(500).json({ error: "Unable to escalate ticket." }); } });
-  app.get("/api/tickets/:id/history", (request, response) => { const id = ticketId(request, response); if (!id) return; return ticketRepository.getTicket(id) ? response.json(ticketRepository.listHistory(id)) : response.status(404).json({ error: "Ticket not found." }); });
+  app.post("/api/tickets/:id/escalate", (request, response) => { const id = ticketId(request, response); if (!id || !requireTicketAccess(request, response, id)) return; try { const ticket = ticketRepository.escalateTicket(id, actor(request)); return ticket ? response.json(ticket) : response.status(404).json({ error: "Ticket not found." }); } catch { return response.status(500).json({ error: "Unable to escalate ticket." }); } });
+  app.get("/api/tickets/:id/history", (request, response) => { const id = ticketId(request, response); if (!id || !requireTicketAccess(request, response, id)) return; return response.json(ticketRepository.listHistory(id)); });
+  app.get("/api/tickets/:id/comments", (request, response) => { const id = ticketId(request, response); if (!id || !requireTicketAccess(request, response, id)) return; return response.json(agentWorkRepository.listComments(id)); });
+  app.post("/api/tickets/:id/comments", (request, response) => {
+    const id = ticketId(request, response); if (!id) return; const { value, errors } = validateComment(request.body ?? {}); if (Object.keys(errors).length) return response.status(400).json({ errors });
+    if (!requireTicketAccess(request, response, id)) return; const database = customerRepository.getDatabase();
+    try { database.exec("BEGIN"); const created = agentWorkRepository.createComment(id, value.body, actor(request)); ticketRepository.addInternalCommentHistory(id, created.id, actor(request)); database.exec("COMMIT"); return response.status(201).json(created); }
+    catch { try { database.exec("ROLLBACK"); } catch { /* no open transaction */ } return response.status(500).json({ error: "Unable to add comment." }); }
+  });
+  app.get("/api/dashboard", (request, response) => {
+    const owner = actor(request), assignedTickets = ticketRepository.listTickets(1, 50, { assignedAgent: owner }).items.filter((ticket) => ticket.assignedAgent.trim().toLowerCase() === owner);
+    const allTickets = isAdmin(request, auth) ? ticketRepository.listTickets(1, 50).items : assignedTickets;
+    return response.json({ assignedTickets, counts: { assigned: assignedTickets.length, open: allTickets.filter((ticket) => ticket.status === "open").length, pending: allTickets.filter((ticket) => ticket.status === "pending").length, urgent: allTickets.filter((ticket) => ticket.priority === "urgent").length }, tasks: agentWorkRepository.listTasks(owner), reminders: agentWorkRepository.listReminders(owner), recentActivity: agentWorkRepository.listActivity(owner) });
+  });
+  app.get("/api/tasks", (request, response) => response.json(agentWorkRepository.listTasks(actor(request))));
+  app.post("/api/tasks", (request, response) => { const { value, errors } = validateTask(request.body ?? {}); if (Object.keys(errors).length) return response.status(400).json({ errors }); try { return response.status(201).json(agentWorkRepository.createTask(actor(request), value)); } catch { return response.status(500).json({ error: "Unable to save task." }); } });
+  app.patch("/api/tasks/:id", (request, response) => { const id = parsePositiveInteger(request.params.id); if (!id) return response.status(400).json({ error: "Invalid task id." }); const { value, errors } = validateTask(request.body ?? {}); if (Object.keys(errors).length) return response.status(400).json({ errors }); try { const updated = agentWorkRepository.updateTask(actor(request), id, value); return updated ? response.json(updated) : response.status(404).json({ error: "Task not found." }); } catch { return response.status(500).json({ error: "Unable to update task." }); } });
+  app.post("/api/tasks/:id/complete", (request, response) => { const id = parsePositiveInteger(request.params.id); if (!id) return response.status(400).json({ error: "Invalid task id." }); try { const updated = agentWorkRepository.completeTask(actor(request), id); return updated ? response.json(updated) : response.status(404).json({ error: "Task not found." }); } catch { return response.status(500).json({ error: "Unable to complete task." }); } });
+  app.delete("/api/tasks/:id", (request, response) => { const id = parsePositiveInteger(request.params.id); if (!id) return response.status(400).json({ error: "Invalid task id." }); return agentWorkRepository.deleteTask(actor(request), id) ? response.status(204).send() : response.status(404).json({ error: "Task not found." }); });
+  app.get("/api/reminders", (request, response) => { const includeDismissed = request.query.includeDismissed === "true"; return response.json(agentWorkRepository.listReminders(actor(request), includeDismissed)); });
+  app.post("/api/reminders", (request, response) => { const { value, errors } = validateReminder(request.body ?? {}); if (Object.keys(errors).length) return response.status(400).json({ errors }); try { return response.status(201).json(agentWorkRepository.createReminder(actor(request), value)); } catch { return response.status(500).json({ error: "Unable to save reminder." }); } });
+  app.post("/api/reminders/:id/dismiss", (request, response) => { const id = parsePositiveInteger(request.params.id); if (!id) return response.status(400).json({ error: "Invalid reminder id." }); const updated = agentWorkRepository.dismissReminder(actor(request), id); return updated ? response.json(updated) : response.status(404).json({ error: "Reminder not found." }); });
+  app.delete("/api/reminders/:id", (request, response) => { const id = parsePositiveInteger(request.params.id); if (!id) return response.status(400).json({ error: "Invalid reminder id." }); return agentWorkRepository.deleteReminder(actor(request), id) ? response.status(204).send() : response.status(404).json({ error: "Reminder not found." }); });
   app.get("/api/communication-channels", (_request, response) => response.json(communicationRepository.listChannels()));
   app.patch("/api/communication-channels/:type", (request, response) => { const type = request.params.type; if (!communicationChannelTypes.includes(type as typeof communicationChannelTypes[number]) || typeof request.body?.enabled !== "boolean") return response.status(400).json({ error: "Invalid channel." }); communicationRepository.setEnabled(type as typeof communicationChannelTypes[number], request.body.enabled); return response.json(communicationRepository.channel(type as typeof communicationChannelTypes[number])); });
   app.get("/api/customers/:id/communications", (request, response) => { const id = customerId(request,response); if (!id) return; return customerRepository.getCustomer(id) ? response.json(communicationRepository.list(id)) : response.status(404).json({error:"Customer not found."}); });
-  app.get("/api/tickets/:id/communications", (request, response) => { const id = ticketId(request,response); if (!id) return; return ticketRepository.getTicket(id) ? response.json(communicationRepository.list(undefined,id)) : response.status(404).json({error:"Ticket not found."}); });
+  app.get("/api/tickets/:id/communications", (request, response) => { const id = ticketId(request,response); if (!id || !requireTicketAccess(request, response, id)) return; return response.json(communicationRepository.list(undefined,id)); });
   app.get("/api/communications", (request, response) => {
     const customerId = request.query.customerId === undefined || request.query.customerId === "" ? undefined : parsePositiveInteger(request.query.customerId);
     const ticketId = request.query.ticketId === undefined || request.query.ticketId === "" ? undefined : parsePositiveInteger(request.query.ticketId);
@@ -225,12 +272,14 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
 
   app.get(protectedPagePaths, (request, response) => {
     if (!getAuthenticatedUser(request, auth)) return response.redirect("/");
+    if (!isAdmin(request, auth) && !["/dashboard", "/tickets", "/tasks", "/activities"].includes(request.path)) return response.status(403).send("Administrator access required.");
     response.setHeader("Cache-Control", "no-store");
     return response.sendFile(join(projectRoot, "public", "index.html"));
   });
 
   app.get(customerDetailsPagePath, (request, response) => {
     if (!getAuthenticatedUser(request, auth)) return response.redirect("/");
+    if (!isAdmin(request, auth)) return response.status(403).send("Administrator access required.");
     response.setHeader("Cache-Control", "no-store");
     return response.sendFile(join(projectRoot, "public", "index.html"));
   });
@@ -249,7 +298,7 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
 
 const auth = new AuthService(process.env.CRM_SESSION_PATH ?? join(projectRoot, "data", "sessions.json"));
 await auth.seedUser("demo@example.com", "Password123!");
-await auth.seedUser("agent@example.com", "Password123!");
+await auth.seedUser("agent@example.com", "Password123!", "agent");
 const app = createApp(auth);
 
 if (process.env.NODE_ENV !== "test") {

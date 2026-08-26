@@ -74,5 +74,13 @@ export function createDatabase(location = process.env.CRM_DATABASE_PATH ?? join(
   CREATE INDEX IF NOT EXISTS customer_communications_customer_idx ON customer_communications (customer_id, received_at DESC, id DESC);
   CREATE INDEX IF NOT EXISTS customer_communications_ticket_idx ON customer_communications (ticket_id, received_at DESC, id DESC);
   INSERT OR IGNORE INTO communication_channels (type, display_name) VALUES ('email','Email'),('whatsapp','WhatsApp'),('live_chat','Live Chat'),('sms','SMS'),('web_form','Web Form');`);
+    database.exec(`CREATE TABLE IF NOT EXISTS agent_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_email TEXT NOT NULL, title TEXT NOT NULL, details TEXT, due_at TEXT, is_completed INTEGER NOT NULL DEFAULT 0, completed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS agent_tasks_owner_idx ON agent_tasks (owner_email, is_completed, due_at, id DESC);
+  CREATE TABLE IF NOT EXISTS agent_reminders (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_email TEXT NOT NULL, message TEXT NOT NULL, remind_at TEXT NOT NULL, is_dismissed INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS agent_reminders_owner_idx ON agent_reminders (owner_email, is_dismissed, remind_at, id DESC);
+  CREATE TABLE IF NOT EXISTS ticket_internal_comments (id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE, body TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS ticket_internal_comments_ticket_idx ON ticket_internal_comments (ticket_id, created_at DESC, id DESC);
+  CREATE TABLE IF NOT EXISTS agent_activity (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_email TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL, ticket_id INTEGER REFERENCES support_tickets(id) ON DELETE SET NULL, created_at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS agent_activity_owner_idx ON agent_activity (owner_email, created_at DESC, id DESC);`);
     return database;
 }

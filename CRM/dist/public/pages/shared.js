@@ -8,6 +8,7 @@ export const protectedPages = {
     "/tasks": "Tasks",
     "/activities": "Activities"
 };
+let currentRole = "agent";
 export function escapeHtml(value) {
     return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]));
 }
@@ -25,7 +26,8 @@ export function showDialog(options) {
     });
 }
 export function renderSidebar(currentPath) {
-    const links = Object.entries(protectedPages).map(([path, label]) => `<a class="nav-link${path === currentPath ? " active" : ""}" href="${path}"><span class="nav-dot" aria-hidden="true"></span>${label}</a>`).join("");
+    const visiblePages = currentRole === "admin" ? protectedPages : Object.fromEntries(Object.entries(protectedPages).filter(([path]) => ["/dashboard", "/tickets", "/tasks", "/activities"].includes(path)));
+    const links = Object.entries(visiblePages).map(([path, label]) => `<a class="nav-link${path === currentPath ? " active" : ""}" href="${path}"><span class="nav-dot" aria-hidden="true"></span>${label}</a>`).join("");
     return `<aside class="sidebar"><div class="sidebar-brand"><span class="brand-mark" aria-hidden="true"></span><span>Northstar CRM</span></div><div class="sidebar-label">Workspace</div><nav class="crm-nav" aria-label="CRM sections">${links}</nav><div class="sidebar-footer"><span class="signal"><i aria-hidden="true"></i><span>Workspace online</span></span><button class="logout-button" id="logout"><span>Log out</span><span aria-hidden="true">&#8594;</span></button></div></aside>`;
 }
 export function renderProtectedShell(content, currentPath) {
@@ -63,6 +65,7 @@ export async function route() {
         renderLogin("Please sign in to continue.");
         return;
     }
+    currentRole = (await authResponse.json()).user.role;
     if (/^\/customers\/\d+$/.test(path)) {
         const { renderCustomerDetails } = await import("./customer-details.js");
         await renderCustomerDetails(Number(path.split("/")[2]));
@@ -88,6 +91,11 @@ export async function route() {
         await renderCommunications();
         return;
     }
+    if (path === "/tasks") {
+        const { renderTasks } = await import("./tasks.js");
+        await renderTasks();
+        return;
+    }
     const { renderDashboard } = await import("./dashboard.js");
-    renderDashboard(protectedPages[path]);
+    await renderDashboard();
 }
