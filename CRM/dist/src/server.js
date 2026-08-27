@@ -501,7 +501,14 @@ export function createApp(auth, customerRepository = new CustomerRepository(crea
         return response.status(404).json({ error: "Article not found." }); const item = knowledgeBaseRepository.get(id, true); return item ? response.json(item) : response.status(404).json({ error: "Article not found." }); });
     function portalCustomer(request, response) { const token = readCookie(request, "crm_portal"); const customer = token ? portalRepository.customerForToken(token) : null; if (customer)
         return customer; const user = getAuthenticatedUser(request, auth); if (user?.role === "customer") {
-        const record = customerRepository.getCustomerByEmail(user.email);
+        let record = customerRepository.getCustomerByEmail(user.email);
+        if (!record && administrationRepository) {
+            const staffUser = administrationRepository.getForLogin(user.email);
+            if (staffUser) {
+                const nameParts = String(staffUser.name).split(" ");
+                record = customerRepository.createCustomer({ firstName: nameParts[0] || "Customer", lastName: nameParts.slice(1).join(" ") || "", email: user.email, phone: "", company: "", jobTitle: "", status: "active", address: "", notes: "" });
+            }
+        }
         if (record)
             return record.id;
     } response.status(401).json({ error: "Portal verification required." }); return null; }
