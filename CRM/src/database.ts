@@ -117,9 +117,29 @@ export function createDatabase(location = process.env.CRM_DATABASE_PATH ?? join(
   CREATE INDEX IF NOT EXISTS ticket_internal_comments_ticket_idx ON ticket_internal_comments (ticket_id, created_at DESC, id DESC);
   CREATE TABLE IF NOT EXISTS agent_activity (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_email TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL, ticket_id INTEGER REFERENCES support_tickets(id) ON DELETE SET NULL, created_at TEXT NOT NULL);
   CREATE INDEX IF NOT EXISTS agent_activity_owner_idx ON agent_activity (owner_email, created_at DESC, id DESC);`);
+  database.exec(`CREATE TABLE IF NOT EXISTS staff_users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('admin','agent','customer','manager')), is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deactivated_at TEXT);
+  CREATE INDEX IF NOT EXISTS staff_users_login_idx ON staff_users(email,is_active);
+  CREATE TABLE IF NOT EXISTS system_settings (key TEXT PRIMARY KEY CHECK(key IN ('organization_name','support_email','default_ticket_priority')), value TEXT NOT NULL, updated_at TEXT NOT NULL);
+  INSERT OR IGNORE INTO system_settings(key,value,updated_at) VALUES ('organization_name','Northstar CRM',datetime('now')),('support_email','support@example.com',datetime('now')),('default_ticket_priority','medium',datetime('now'));
+  CREATE TABLE IF NOT EXISTS audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, actor_email TEXT NOT NULL, action TEXT NOT NULL, target_kind TEXT NOT NULL, target_id TEXT, detail TEXT NOT NULL, created_at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS audit_logs_list_idx ON audit_logs(action,created_at DESC,id DESC);`);
   database.exec(`CREATE TABLE IF NOT EXISTS knowledge_articles (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL CHECK(type IN ('faq','help','solution','guide')), category TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('draft','published')), published_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
   CREATE INDEX IF NOT EXISTS knowledge_articles_public_idx ON knowledge_articles(status,type,category,updated_at DESC,id DESC);
   CREATE TABLE IF NOT EXISTS portal_sessions (token_hash TEXT PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE, expires_at TEXT NOT NULL, created_at TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS ticket_feedback (id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE, customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE, rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5), message TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(ticket_id,customer_id));`);
+  try {
+    database.exec("INSERT INTO staff_users (name, email, password_hash, role, is_active, created_at, updated_at) VALUES ('_schema_test', '_schema_test@example.com', 'test', 'customer', 1, datetime('now'), datetime('now'))");
+    database.exec("DELETE FROM staff_users WHERE email = '_schema_test@example.com'");
+  } catch {
+    database.exec(`CREATE TABLE staff_users_new (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('admin','agent','customer','manager')), is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deactivated_at TEXT)`);
+    try {
+      database.exec("INSERT INTO staff_users_new SELECT id, name, email, password_hash, role, is_active, created_at, updated_at, deactivated_at FROM staff_users");
+      database.exec("DROP TABLE staff_users");
+      database.exec("ALTER TABLE staff_users_new RENAME TO staff_users");
+      database.exec("CREATE INDEX IF NOT EXISTS staff_users_login_idx ON staff_users(email,is_active)");
+    } catch {
+      database.exec("DROP TABLE IF EXISTS staff_users_new");
+    }
+  }
   return database;
 }

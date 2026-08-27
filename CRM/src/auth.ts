@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { LoginCredentials, validateLogin } from "./validation.js";
 
-export const userRoles = ["admin", "agent", "customer"] as const;
+export const userRoles = ["admin", "manager", "agent", "customer"] as const;
 export type UserRole = typeof userRoles[number];
 export type PublicUser = { id: string; email: string; role: UserRole };
 
@@ -13,6 +13,9 @@ type User = PublicUser & { passwordHash: string };
 export class AuthService {
   private readonly users = new Map<string, User>();
   private readonly sessions = new Map<string, { user: PublicUser; expiresAt: number }>();
+  private staffStore?: { getForLogin(email:string): { id:number; email:string; role:UserRole; name:string; passwordHash:string } | null; isActive(email:string):boolean; seed(email:string,password:string,role:UserRole):Promise<void> };
+
+  setStaffStore(store: NonNullable<AuthService["staffStore"]>): void { this.staffStore = store; }
 
   constructor(private readonly sessionPath?: string) {
     if (!sessionPath || !existsSync(sessionPath)) return;
@@ -33,6 +36,7 @@ export class AuthService {
   }
 
   async seedUser(email: string, password: string, role: UserRole = "admin"): Promise<void> {
+    if (this.staffStore) { await this.staffStore.seed(email,password,role); return; }
     const normalizedEmail = email.trim().toLowerCase();
     this.users.set(normalizedEmail, {
       id: randomUUID(),
@@ -44,7 +48,8 @@ export class AuthService {
 
   async customerLogin(email: string, _password: string): Promise<{ token: string; user: PublicUser } | null> {
     const normalizedEmail = email.trim().toLowerCase();
-    const user = this.users.get(normalizedEmail);
+    const stored = this.staffStore?.getForLogin(normalizedEmail);
+    const user = stored ? { id:String(stored.id), email:stored.email, role:stored.role, passwordHash:stored.passwordHash } : this.users.get(normalizedEmail);
     if (!user || user.role !== "customer") return null;
     const token = randomUUID();
     this.sessions.set(token, { user: { id: user.id, email: user.email, role: user.role }, expiresAt: Date.now() + 60 * 60 * 1000 });
@@ -55,7 +60,8 @@ export class AuthService {
   async login(credentials: LoginCredentials): Promise<{ token: string; user: PublicUser } | null> {
     if (validateLogin(credentials)) return null;
     const normalizedEmail = credentials.email.trim().toLowerCase();
-    const user = this.users.get(normalizedEmail);
+    const stored = this.staffStore?.getForLogin(normalizedEmail);
+    const user = stored ? { id:String(stored.id), email:stored.email, role:stored.role, passwordHash:stored.passwordHash } : this.users.get(normalizedEmail);
     if (!user || user.role === "customer") return null;
     if (!(await bcrypt.compare(credentials.password, user.passwordHash))) return null;
 
@@ -68,7 +74,7 @@ export class AuthService {
   getUser(token: string | undefined): PublicUser | null {
     if (!token) return null;
     const session = this.sessions.get(token);
-    if (!session || session.expiresAt <= Date.now()) {
+    if (!session || session.expiresAt <= Date.now() || (session.user.role !== "customer" && this.staffStore !== undefined && !this.staffStore.isActive(session.user.email))) {
       this.sessions.delete(token);
       this.persistSessions();
       return null;

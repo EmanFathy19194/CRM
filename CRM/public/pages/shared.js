@@ -3,12 +3,16 @@ export const protectedPages = {
     "/customers": "Customers",
     "/tickets": "Tickets",
     "/communications": "Communications",
-    "/contacts": "Contacts",
-    "/opportunities": "Opportunities",
+    // "/contacts": "Contacts",
+    // "/opportunities": "Opportunities",
     "/tasks": "Tasks",
-    "/activities": "Activities",
+    // "/activities": "Activities",
     "/automation": "Automation",
-    "/admin/knowledge-base": "Knowledge Base"
+    "/admin/knowledge-base": "Knowledge Base",
+    "/reports": "Reports",
+    "/admin/users": "Users",
+    "/admin/audit-logs": "Audit logs",
+    "/admin/settings": "Settings"
 };
 let currentRole = "agent";
 export function escapeHtml(value) {
@@ -100,6 +104,21 @@ export async function route() {
     if (path === "/automation") {
         const { renderAutomation } = await import("./automation.js");
         await renderAutomation();
+        return;
+    }
+    if (path === "/reports") {
+        const { renderReports } = await import("./reports.js");
+        await renderReports();
+        return;
+    }
+    if (path === "/admin/users") {
+        const { renderAdminUsers } = await import("./admin-users.js");
+        await renderAdminUsers();
+        return;
+    }
+    if (path === "/admin/settings" || path === "/admin/audit-logs") {
+        const { renderAdminSettings } = await import("./admin-settings.js");
+        await renderAdminSettings();
         return;
     }
     if (path === "/tasks") {

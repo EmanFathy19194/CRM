@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
+import bcrypt from "bcryptjs";
 import { AuthService } from "./auth.js";
 import { validateLogin } from "./validation.js";
 import { createDatabase } from "./database.js";
@@ -23,15 +24,18 @@ import { validateAutomationRule, validateSlaRule } from "./automation-validation
 import { KnowledgeBaseRepository } from "./knowledge-base-repository.js";
 import { CustomerPortalRepository } from "./customer-portal-repository.js";
 import { validateKnowledgeArticle, validatePortalAccess, validateTicketFeedback } from "./knowledge-base-validation.js";
+import { UserAdministrationRepository } from "./user-administration-repository.js";
+import { ReportsRepository } from "./reports-repository.js";
+import { validateReportRange, validateSettings, validateStaffUser } from "./user-administration-validation.js";
 
 const cookieName = "crm_session";
 const projectRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const uploadDirectory = process.env.CRM_UPLOAD_DIR ?? join(projectRoot, "data", "uploads");
 mkdirSync(uploadDirectory, { recursive: true });
-const protectedPagePaths = ["/dashboard", "/customers", "/tickets", "/communications", "/contacts", "/opportunities", "/tasks", "/activities", "/automation", "/admin/knowledge-base"];
+const protectedPagePaths = ["/dashboard", "/customers", "/tickets", "/communications", "/contacts", "/opportunities", "/tasks", "/activities", "/automation", "/admin/knowledge-base", "/reports", "/admin/users", "/admin/audit-logs", "/admin/settings"];
 const customerDetailsPagePath = /^\/customers\/\d+$/;
 const ticketDetailsPagePath = /^\/tickets\/\d+$/;
-const protectedApiPaths = ["/api/customers", "/api/tickets", "/api/communications", "/api/communication-channels", "/api/dashboard", "/api/tasks", "/api/reminders", "/api/contacts", "/api/opportunities", "/api/activities", "/api/sla-rules", "/api/automation-rules", "/api/notifications", "/api/articles"];
+const protectedApiPaths = ["/api/customers", "/api/tickets", "/api/communications", "/api/communication-channels", "/api/dashboard", "/api/tasks", "/api/reminders", "/api/contacts", "/api/opportunities", "/api/activities", "/api/sla-rules", "/api/automation-rules", "/api/notifications", "/api/articles", "/api/reports", "/api/admin"];
 const upload = multer({ dest: uploadDirectory, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: (_request, file, callback) => callback(null, /^[a-zA-Z0-9._ -]+$/.test(file.originalname)) });
 
 function readCookie(request: Request, name: string): string | undefined {
@@ -48,6 +52,7 @@ function getAuthenticatedUser(request: Request, auth: AuthService) {
 function isAdmin(request: Request, auth: AuthService): boolean {
   return getAuthenticatedUser(request, auth)?.role === "admin";
 }
+function isManagerOrAdmin(request: Request, auth: AuthService): boolean { return isAdmin(request,auth); }
 
 export function createApp(auth: AuthService, customerRepository = new CustomerRepository(createDatabase()), ticketRepository = new TicketRepository(customerRepository.getDatabase())) {
   const communicationRepository = new CommunicationRepository(customerRepository.getDatabase());
@@ -55,6 +60,9 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
   const automationRepository = new AutomationRepository(customerRepository.getDatabase(), ticketRepository);
   const knowledgeBaseRepository = new KnowledgeBaseRepository(customerRepository.getDatabase());
   const portalRepository = new CustomerPortalRepository(customerRepository.getDatabase());
+  const administrationRepository = new UserAdministrationRepository(customerRepository.getDatabase());
+  const reportsRepository = new ReportsRepository(customerRepository.getDatabase());
+  auth.setStaffStore(administrationRepository);
   const app = express();
   app.use(express.json({ limit: "10kb" }));
 
@@ -69,6 +77,8 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
     if (!isAdmin(request, auth)) return response.status(403).json({ error: "Administrator access required." });
     return next();
   });
+  app.use("/api/admin", (request,response,next) => isAdmin(request,auth) ? next() : response.status(403).json({error:"Administrator access required."}));
+  app.use("/api/reports", (request,response,next) => isManagerOrAdmin(request,auth) ? next() : response.status(403).json({error:"Manager access required."}));
 
   app.get("/api/customers", (request, response) => {
     const page = Number(request.query.page ?? 1);
@@ -165,6 +175,18 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
   app.get("/api/notifications", (request,response) => response.json(automationRepository.listNotifications(actor(request))));
   app.post("/api/notifications/:id/dismiss", (request,response) => {const id=parsePositiveInteger(request.params.id);if(!id)return response.status(400).json({error:"Invalid notification id."});return automationRepository.dismissNotification(actor(request),id)?response.status(200).json({dismissed:true}):response.status(404).json({error:"Notification not found."});});
 
+  const report=(name:"tickets"|"sla"|"agents"|"satisfaction"|"management") => (request:Request,response:Response) => { const {value,errors}=validateReportRange(request.query as Record<string,unknown>); if(Object.keys(errors).length)return response.status(400).json({errors}); return response.json(reportsRepository[name](value)); };
+  app.get("/api/reports/tickets",report("tickets")); app.get("/api/reports/sla",report("sla")); app.get("/api/reports/agents",report("agents")); app.get("/api/reports/satisfaction",report("satisfaction")); app.get("/api/reports/management",report("management"));
+  app.get("/api/admin/users",(request,response)=>response.json(administrationRepository.list(Number(request.query.page??1),Number(request.query.pageSize??20),String(request.query.search??""))));
+  app.post("/api/admin/users",async(request,response)=>{const {value,errors}=validateStaffUser(request.body??{});if(Object.keys(errors).length)return response.status(400).json({errors});try{return response.status(201).json(await administrationRepository.create(value as import("./user-administration.js").StaffUserInput,actor(request)));}catch{return response.status(400).json({error:"Unable to create user."});}});
+  app.get("/api/admin/users/:id",(request,response)=>{const id=parsePositiveInteger(request.params.id);if(!id)return response.status(400).json({error:"Invalid user id."});const item=administrationRepository.get(id);return item?response.json(item):response.status(404).json({error:"User not found."});});
+  app.patch("/api/admin/users/:id",async(request,response)=>{const id=parsePositiveInteger(request.params.id),result=validateStaffUser(request.body??{},true);if(!id)return response.status(400).json({error:"Invalid user id."});if(Object.keys(result.errors).length)return response.status(400).json({errors:result.errors});try{const item=await administrationRepository.update(id,result.value as import("./user-administration.js").StaffUserUpdateInput,actor(request));return item?response.json(item):response.status(404).json({error:"User not found."});}catch{return response.status(400).json({error:"Unable to update user."});}});
+  app.post("/api/admin/users/:id/deactivate",(request,response)=>{const id=parsePositiveInteger(request.params.id);if(!id)return response.status(400).json({error:"Invalid user id."});const result=administrationRepository.deactivate(id,actor(request));return result==="ok"?response.status(200).json({deactivated:true}):result==="missing"?response.status(404).json({error:"User not found."}):response.status(409).json({error:"This user cannot be deactivated."});});
+  app.delete("/api/admin/users/:id",(request,response)=>{const id=parsePositiveInteger(request.params.id);if(!id)return response.status(400).json({error:"Invalid user id."});const result=administrationRepository.delete(id,actor(request));return result?response.status(204).send():response.status(404).json({error:"User not found."});});
+  app.get("/api/admin/audit-logs",(request,response)=>response.json(administrationRepository.audits(Number(request.query.page??1),Number(request.query.pageSize??30),String(request.query.action??""))));
+  app.get("/api/admin/settings",(_request,response)=>response.json(administrationRepository.settings()));
+  app.patch("/api/admin/settings",(request,response)=>{const {value,errors}=validateSettings(request.body??{});if(Object.keys(errors).length)return response.status(400).json({errors});try{return response.json(administrationRepository.updateSettings(value,actor(request)));}catch{return response.status(500).json({error:"Unable to update settings."});}});
+
   app.get("/api/tickets", (request, response) => {
     const page = parsePositiveInteger(request.query.page ?? 1), pageSize = parsePositiveInteger(request.query.pageSize ?? 10);
     const status = String(request.query.status ?? ""), priority = String(request.query.priority ?? ""), assignedAgent = String(request.query.assignedAgent ?? ""), customerId = request.query.customerId === undefined || request.query.customerId === "" ? undefined : parsePositiveInteger(request.query.customerId);
@@ -254,7 +276,7 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
   app.delete("/api/articles/:id", (request,response) => { if(!isAdmin(request,auth)) return response.status(403).json({error:"Administrator access required."});const id=parsePositiveInteger(request.params.id);if(!id)return response.status(400).json({error:"Invalid article id."});return knowledgeBaseRepository.delete(id)?response.status(204).send():response.status(404).json({error:"Article not found."}); });
   app.get("/api/public/articles", (request,response) => response.json(knowledgeBaseRepository.list(Number(request.query.page??1),Number(request.query.pageSize??10),true,String(request.query.search??""),String(request.query.type??""),String(request.query.category??""))));
   app.get("/api/public/articles/:id", (request,response) => { const id=parsePositiveInteger(request.params.id);if(!id)return response.status(404).json({error:"Article not found."});const item=knowledgeBaseRepository.get(id,true);return item?response.json(item):response.status(404).json({error:"Article not found."}); });
-  function portalCustomer(request:Request,response:Response){const token=readCookie(request,"crm_portal");const customer=token?portalRepository.customerForToken(token):null;if(customer)return customer;const user=getAuthenticatedUser(request,auth);if(user?.role==="customer"){const record=customerRepository.getCustomerByEmail(user.email);if(record)return record.id;}response.status(401).json({error:"Portal verification required."});return null;}
+  function portalCustomer(request:Request,response:Response){const token=readCookie(request,"crm_portal");const customer=token?portalRepository.customerForToken(token):null;if(customer)return customer;const user=getAuthenticatedUser(request,auth);if(user?.role==="customer"){let record=customerRepository.getCustomerByEmail(user.email);if(!record&&administrationRepository){const staffUser=administrationRepository.getForLogin(user.email);if(staffUser){const nameParts=String(staffUser.name).split(" ");record=customerRepository.createCustomer({firstName:nameParts[0]||"Customer",lastName:nameParts.slice(1).join(" ")||"",email:user.email,phone:"",company:"",jobTitle:"",status:"active",address:"",notes:""});}}if(record)return record.id;}response.status(401).json({error:"Portal verification required."});return null;}
   app.post("/api/public/portal-sessions",(request,response)=>{const result=validatePortalAccess(request.body??{});if(Object.keys(result.errors).length)return response.status(400).json({errors:result.errors});const customer=portalRepository.verify(result.value.email,result.value.ticketNumber);if(!customer)return response.status(404).json({error:"Portal record not found."});response.cookie("crm_portal",portalRepository.createSession(customer),{httpOnly:true,sameSite:"lax",secure:process.env.NODE_ENV==="production",maxAge:3600000,path:"/"});return response.status(201).json({ok:true});});
   app.delete("/api/public/portal-sessions",(request,response)=>{const token=readCookie(request,"crm_portal");if(token)portalRepository.revoke(token);response.clearCookie("crm_portal",{httpOnly:true,sameSite:"lax",path:"/"});return response.status(204).send();});
   app.get("/api/public/portal/tickets",(request,response)=>{const customer=portalCustomer(request,response);return customer?response.json(portalRepository.list(customer)):undefined;});
@@ -285,7 +307,16 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
     if (validationError) return response.status(400).json({ error: validationError });
 
     const staffResult = await auth.login({ email: credentials.email!, password: credentials.password! });
-    const result = staffResult ?? (customerRepository.verifyCustomerPassword(credentials.email!, credentials.password!) ? await auth.customerLogin(credentials.email!, credentials.password!) : null);
+    let result = staffResult;
+    if (!result) {
+      const staffUser = administrationRepository.getForLogin(credentials.email!.trim().toLowerCase());
+      if (staffUser && staffUser.role === "customer" && await bcrypt.compare(credentials.password!, staffUser.passwordHash)) {
+        result = await auth.customerLogin(credentials.email!, credentials.password!);
+      }
+    }
+    if (!result) {
+      result = customerRepository.verifyCustomerPassword(credentials.email!, credentials.password!) ? await auth.customerLogin(credentials.email!, credentials.password!) : null;
+    }
     if (!result) return response.status(401).json({ error: "Invalid email or password." });
 
     response.cookie(cookieName, result.token, {
@@ -331,7 +362,8 @@ export function createApp(auth: AuthService, customerRepository = new CustomerRe
 
   app.get(protectedPagePaths, (request, response) => {
     if (!getAuthenticatedUser(request, auth)) return response.redirect("/");
-    if (!isAdmin(request, auth) && !["/dashboard", "/tickets", "/tasks", "/activities"].includes(request.path)) return response.status(403).send("Administrator access required.");
+    if (request.path === "/reports" && !isManagerOrAdmin(request,auth)) return response.status(403).send("Manager access required.");
+    if (!isAdmin(request, auth) && !["/dashboard", "/tickets", "/tasks", "/activities", "/reports"].includes(request.path)) return response.status(403).send("Administrator access required.");
     response.setHeader("Cache-Control", "no-store");
     return response.sendFile(join(projectRoot, "public", "index.html"));
   });
@@ -365,6 +397,8 @@ await auth.seedUser("customer@example.com", "Password123!", "customer");
 const customerRepository = new CustomerRepository(createDatabase());
 customerRepository.createCustomer({ firstName: "Demo", lastName: "Customer", email: "customer@example.com", phone: "", company: "", jobTitle: "", status: "active", address: "", notes: "", password: "Password123!" });
 const app = createApp(auth, customerRepository);
+await auth.seedUser("demo@example.com", "Password123!");
+await auth.seedUser("agent@example.com", "Password123!", "agent");
 
 if (process.env.NODE_ENV !== "test") {
   app.listen(Number(process.env.PORT ?? 3000), () => {
